@@ -20,6 +20,10 @@ futures = '0.3.1'
 log = '0.4.8'
 structopt = '0.3.8'
 
+[dependencies.evm]
+package = 'pallet-ssvm'
+path = '../pallets/ssvm'
+
 [dependencies.grandpa]
 package = 'sc-finality-grandpa'
 version = '0.8.0-alpha.5'

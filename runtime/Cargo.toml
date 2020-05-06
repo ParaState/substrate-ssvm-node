@@ -7,6 +7,19 @@ name = 'node-template-runtime'
 repository = 'https://github.com/paritytech/substrate/'
 version = '2.0.0-alpha.5'
 
+[dependencies.evm]
+default-features = false
+package = 'pallet-ssvm'
+path = '../pallets/ssvm'
+
+[dependencies.sha3]
+default-features = false
+version = '0.8'
+
+[dependencies.hash256-std-hasher]
+default-features = false
+version = '0.15.2'
+
 [dependencies.aura]
 default-features = false
 package = 'pallet-aura'
@@ -104,12 +117,6 @@ default-features = false
 package = 'frame-system'
 version = '2.0.0-alpha.5'
 
-[dependencies.template]
-default-features = false
-package = 'pallet-template'
-path = '../pallets/template'
-version = '2.0.0-alpha.5'
-
 [dependencies.timestamp]
 default-features = false
 package = 'pallet-timestamp'
@@ -150,5 +157,7 @@ std = [
     'system/std',
     'timestamp/std',
     'transaction-payment/std',
-    'template/std',
+    'evm/std',
+    'hash256-std-hasher/std',
+    'sha3/std',
 ]
