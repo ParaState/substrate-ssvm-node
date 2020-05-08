@@ -1,13 +1,13 @@
-use evm::{ConvertAccountId, HashTruncateConvertAccountId};
 use grandpa_primitives::AuthorityId as GrandpaId;
 use node_template_runtime::{
-    AccountId, AuraConfig, BalancesConfig, EVMAccount, EVMConfig, GenesisConfig, GrandpaConfig,
+    AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig, SSVMAccount, SSVMConfig,
     Sha3Hasher, Signature, SudoConfig, SystemConfig, WASM_BINARY,
 };
 use sc_service;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::{sr25519, Pair, Public};
 use sp_runtime::traits::{IdentifyAccount, Verify};
+use ssvm::{ConvertAccountId, HashTruncateConvertAccountId};
 
 // Note this is the URL for the telemetry server
 //const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
@@ -147,12 +147,12 @@ fn testnet_genesis(
                 .collect(),
         }),
         sudo: Some(SudoConfig { key: root_key }),
-        evm: Some(EVMConfig {
+        ssvm: Some(SSVMConfig {
             accounts: vec![(
                 HashTruncateConvertAccountId::<Sha3Hasher>::convert_account_id(
                     &get_account_id_from_seed::<sr25519::Public>("Alice"),
                 ),
-                EVMAccount {
+                SSVMAccount {
                     nonce: 0.into(),
                     balance: 1000000.into(),
                 },

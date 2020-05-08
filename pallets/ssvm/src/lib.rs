@@ -21,8 +21,9 @@
 
 mod backend;
 
-pub use crate::backend::{Account, Backend, Log, Vicinity};
-
+#[cfg(feature = "std")]
+use crate::backend::HostContext;
+pub use crate::backend::{create_address, Account, Backend, Log, TxContext, Vicinity};
 use evm::backend::ApplyBackend;
 use evm::executor::StackExecutor;
 use evm::{Config, ExitError, ExitReason, ExitSucceed};
@@ -38,25 +39,16 @@ use sp_runtime::{
     traits::{AccountIdConversion, SaturatedConversion, UniqueSaturatedInto},
     DispatchResult,
 };
-use sp_std::{marker::PhantomData, vec::Vec};
+use sp_std::convert::TryInto;
+use sp_std::{if_std, marker::PhantomData, vec::Vec};
+#[cfg(feature = "std")]
+use ssvm::{CallKind, Revision};
 
-const MODULE_ID: ModuleId = ModuleId(*b"py/ethvm");
+const MODULE_ID: ModuleId = ModuleId(*b"ssvmmoid");
 
 /// Type alias for currency balance.
 pub type BalanceOf<T> =
     <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
-
-/// Trait that outputs the current transaction gas price.
-pub trait FeeCalculator {
-    /// Return the minimal required gas price.
-    fn min_gas_price() -> U256;
-}
-
-impl FeeCalculator for () {
-    fn min_gas_price() -> U256 {
-        U256::zero()
-    }
-}
 
 /// Trait for converting account ids of `balances` module into
 /// `H160` for EVM module.
@@ -96,53 +88,18 @@ impl<H: Hasher, A: AsRef<[u8]>> ConvertAccountId<A> for HashTruncateConvertAccou
     }
 }
 
-/// Custom precompiles to be used by EVM engine.
-pub trait Precompiles {
-    /// Try to execute the code address as precompile. If the code address is not
-    /// a precompile or the precompile is not yet available, return `None`.
-    /// Otherwise, calculate the amount of gas needed with given `input` and
-    /// `target_gas`. Return `Some(Ok(status, output, gas_used))` if the execution
-    /// is successful. Otherwise return `Some(Err(_))`.
-    fn execute(
-        address: H160,
-        input: &[u8],
-        target_gas: Option<usize>,
-    ) -> Option<core::result::Result<(ExitSucceed, Vec<u8>, usize), ExitError>>;
-}
-
-impl Precompiles for () {
-    fn execute(
-        _address: H160,
-        _input: &[u8],
-        _target_gas: Option<usize>,
-    ) -> Option<core::result::Result<(ExitSucceed, Vec<u8>, usize), ExitError>> {
-        None
-    }
-}
-
-static ISTANBUL_CONFIG: Config = Config::istanbul();
-
-/// EVM module trait
+/// SSVM module trait
 pub trait Trait: frame_system::Trait + pallet_timestamp::Trait {
-    /// Calculator for current gas price.
-    type FeeCalculator: FeeCalculator;
     /// Convert account ID to H160;
     type ConvertAccountId: ConvertAccountId<Self::AccountId>;
     /// Currency type for deposit and withdraw.
     type Currency: Currency<Self::AccountId>;
     /// The overarching event type.
     type Event: From<Event> + Into<<Self as frame_system::Trait>::Event>;
-    /// Precompiles associated with this EVM engine.
-    type Precompiles: Precompiles;
-
-    /// EVM config used in the module.
-    fn config() -> &'static Config {
-        &ISTANBUL_CONFIG
-    }
 }
 
 decl_storage! {
-    trait Store for Module<T: Trait> as EVM {
+    trait Store for Module<T: Trait> as SSVM {
         Accounts get(fn accounts) config(): map hasher(blake2_128_concat) H160 => Account;
         AccountCodes: map hasher(blake2_128_concat) H160 => Vec<u8>;
         AccountStorages: double_map hasher(blake2_128_concat) H160, hasher(blake2_128_concat) H256 => H256;
@@ -150,12 +107,14 @@ decl_storage! {
 }
 
 decl_event! {
-    /// EVM events
+    /// SSVM events
     pub enum Event {
-        /// Ethereum events from contracts.
+        Nonce(U256),
+        Create(H160),
+        Call(H160),
+        Output(Vec<u8>),
         Log(Log),
-        /// A contract has been created at given address.
-        Created(H160),
+        LogMessage(String),
     }
 }
 
@@ -188,7 +147,7 @@ decl_module! {
 
         fn deposit_event() = default;
 
-        /// Deposit balance from currency/balances module into EVM.
+        /// Deposit balance from currency/balances module into Ewasm.
         #[weight = SimpleDispatchInfo::FixedNormal(10_000)]
         fn deposit_balance(origin, value: BalanceOf<T>) {
             let sender = ensure_signed(origin)?;
@@ -208,7 +167,7 @@ decl_module! {
             });
         }
 
-        /// Withdraw balance from EVM into currency/balances module.
+        /// Withdraw balance from Ewasm into currency/balances module.
         #[weight = SimpleDispatchInfo::FixedNormal(10_000)]
         fn withdraw_balance(origin, value: BalanceOf<T>) {
             let sender = ensure_signed(origin)?;
@@ -231,8 +190,8 @@ decl_module! {
             T::Currency::resolve_creating(&sender, imbalance);
         }
 
-        /// Issue an EVM call operation. This is similar to a message call transaction in Ethereum.
-        #[weight = FunctionOf(|(_, _, _, gas_limit, gas_price, _): (&H160, &Vec<u8>, &U256, &u32, &U256, &Option<U256>)| (*gas_price).saturated_into::<Weight>().saturating_mul(*gas_limit), DispatchClass::Normal, true)]
+        /// Issue an Ewasm call operation. This is similar to a message call transaction in Ethereum.
+        #[weight = FunctionOf(|(_, _, _, gas_limit, gas_price): (&H160, &Vec<u8>, &U256, &u32, &U256)| (*gas_price).saturated_into::<Weight>().saturating_mul(*gas_limit), DispatchClass::Normal, true)]
         fn call(
             origin,
             target: H160,
@@ -240,108 +199,73 @@ decl_module! {
             value: U256,
             gas_limit: u32,
             gas_price: U256,
-            nonce: Option<U256>,
         ) -> DispatchResult {
             let sender = ensure_signed(origin)?;
             let source = T::ConvertAccountId::convert_account_id(&sender);
-
-            Self::execute_evm(
+            let nonce = Accounts::get(&source).nonce;
+            let result = Self::execute_ssvm(
                 source,
+                target,
                 value,
+                input,
                 gas_limit,
                 gas_price,
                 nonce,
-                |executor| ((), executor.transact_call(
-                    source,
-                    target,
-                    value,
-                    input,
-                    gas_limit as usize,
-                )),
-            ).map_err(Into::into)
-        }
-
-        /// Issue an EVM create operation. This is similar to a contract creation transaction in
-        /// Ethereum.
-        #[weight = FunctionOf(|(_, _, gas_limit, gas_price, _): (&Vec<u8>, &U256, &u32, &U256, &Option<U256>)| (*gas_price).saturated_into::<Weight>().saturating_mul(*gas_limit), DispatchClass::Normal, true)]
-        fn create(
-            origin,
-            init: Vec<u8>,
-            value: U256,
-            gas_limit: u32,
-            gas_price: U256,
-            nonce: Option<U256>,
-        ) -> DispatchResult {
-            let sender = ensure_signed(origin)?;
-            let source = T::ConvertAccountId::convert_account_id(&sender);
-
-            let create_address = Self::execute_evm(
-                source,
-                value,
-                gas_limit,
-                gas_price,
-                nonce,
-                |executor| {
-                    (executor.create_address(
-                        evm::CreateScheme::Legacy { caller: source },
-                    ), executor.transact_create(
-                        source,
-                        value,
-                        init,
-                        gas_limit as usize,
-                    ))
-                },
+                CallKind::EVMC_CALL,
             )?;
 
-            Module::<T>::deposit_event(Event::Created(create_address));
+            Module::<T>::deposit_event(Event::Nonce(nonce));
+            Module::<T>::deposit_event(Event::Call(target));
+            Module::<T>::deposit_event(Event::Output(result.to_owned()));
+            Module::<T>::deposit_event(Event::LogMessage(hex::encode(result.to_owned())));
+
+            Accounts::mutate(&source, |account| {
+                account.nonce += U256::one();
+            });
             Ok(())
         }
 
-        /// Issue an EVM create2 operation.
-        #[weight = FunctionOf(|(_, _, _, gas_limit, gas_price, _): (&Vec<u8>, &H256, &U256, &u32, &U256, &Option<U256>)| (*gas_price).saturated_into::<Weight>().saturating_mul(*gas_limit), DispatchClass::Normal, true)]
-        fn create2(
+        /// Create contract with Ewasm
+        #[weight = FunctionOf(|(_, _, gas_limit, gas_price): (&Vec<u8>, &U256, &u32, &U256)| (*gas_price).saturated_into::<Weight>().saturating_mul(*gas_limit), DispatchClass::Normal, true)]
+        fn create(
             origin,
-            init: Vec<u8>,
-            salt: H256,
+            code: Vec<u8>,
             value: U256,
             gas_limit: u32,
             gas_price: U256,
-            nonce: Option<U256>,
         ) -> DispatchResult {
             let sender = ensure_signed(origin)?;
             let source = T::ConvertAccountId::convert_account_id(&sender);
-
-            let code_hash = H256::from_slice(Keccak256::digest(&init).as_slice());
-            let create_address = Self::execute_evm(
+            let nonce = Accounts::get(&source).nonce;
+            let created_address = create_address(source, nonce);
+            let output = Self::execute_ssvm(
                 source,
+                created_address,
                 value,
+                code,
                 gas_limit,
                 gas_price,
                 nonce,
-                |executor| {
-                    (executor.create_address(
-                        evm::CreateScheme::Create2 { caller: source, code_hash, salt },
-                    ), executor.transact_create2(
-                        source,
-                        value,
-                        init,
-                        salt,
-                        gas_limit as usize,
-                    ))
-                },
+                CallKind::EVMC_CREATE,
             )?;
 
-            Module::<T>::deposit_event(Event::Created(create_address));
+            Module::<T>::deposit_event(Event::Nonce(nonce));
+            Module::<T>::deposit_event(Event::Create(created_address));
+            Module::<T>::deposit_event(Event::Output(output.to_owned()));
+            Module::<T>::deposit_event(Event::LogMessage(hex::encode(output.to_owned())));
+
+            Accounts::mutate(&source, |account| {
+                account.nonce += U256::one();
+            });
+            AccountCodes::insert(created_address, output.to_owned());
+
             Ok(())
         }
     }
 }
 
 impl<T: Trait> Module<T> {
-    /// The account ID of the EVM module.
-    ///
-    /// This actually does computation. If you need to keep using it, then make sure you cache the
-    /// value and only call this once.
+    /// The account ID of the SSVM module.
     pub fn account_id() -> T::AccountId {
         MODULE_ID.into_account()
     }
@@ -368,70 +292,62 @@ impl<T: Trait> Module<T> {
         AccountStorages::remove_prefix(address);
     }
 
-    /// Execute an EVM operation.
-    fn execute_evm<F, R>(
+    /// Execute SSVM.
+    fn execute_ssvm(
         source: H160,
+        target: H160,
         value: U256,
+        data: Vec<u8>,
         gas_limit: u32,
         gas_price: U256,
-        nonce: Option<U256>,
-        f: F,
-    ) -> Result<R, Error<T>>
-    where
-        F: FnOnce(&mut StackExecutor<Backend<T>>) -> (R, ExitReason),
-    {
-        ensure!(
-            gas_price >= T::FeeCalculator::min_gas_price(),
-            Error::<T>::GasPriceTooLow
-        );
-
-        let vicinity = Vicinity {
-            gas_price,
-            origin: source,
-        };
-
-        let mut backend = Backend::<T>::new(&vicinity);
-        let mut executor = StackExecutor::new_with_precompile(
-            &backend,
-            gas_limit as usize,
-            T::config(),
-            T::Precompiles::execute,
-        );
-
-        let total_fee = gas_price
-            .checked_mul(U256::from(gas_limit))
-            .ok_or(Error::<T>::FeeOverflow)?;
-        let total_payment = value
-            .checked_add(total_fee)
-            .ok_or(Error::<T>::PaymentOverflow)?;
-        let source_account = Accounts::get(&source);
-        ensure!(
-            source_account.balance >= total_payment,
-            Error::<T>::BalanceLow
-        );
-        executor
-            .withdraw(source, total_fee)
-            .map_err(|_| Error::<T>::WithdrawFailed)?;
-
-        if let Some(nonce) = nonce {
-            ensure!(source_account.nonce == nonce, Error::<T>::InvalidNonce);
+        nonce: U256,
+        call_kind: CallKind,
+    ) -> Result<Vec<u8>, Error<T>> {
+        if_std! {
+            // No coinbase, difficulty in substrate nodes.
+            let coinbase = H160::zero();
+            let difficulty = U256::zero();
+            let chain_id = U256::from(sp_io::misc::chain_id());
+            let block_number: u128 = frame_system::Module::<T>::block_number().unique_saturated_into();
+            let timestamp: u128 = pallet_timestamp::Module::<T>::get().unique_saturated_into();
+            let code = match call_kind {
+                CallKind::EVMC_CALL => AccountCodes::get(&target),
+                CallKind::EVMC_CREATE => data.to_owned(),
+                _ => data.to_owned(),
+            };
+            let tx_context = TxContext::new(
+                gas_price,
+                source,
+                coinbase,
+                block_number.try_into().unwrap(),
+                timestamp.try_into().unwrap(),
+                gas_limit.into(),
+                difficulty,
+                chain_id,
+            );
+            let context = HostContext::<T>::new(tx_context);
+            let depth = 0;
+            let create2_salt = [0u8; 32];
+            let _vm = ssvm::create();
+            let (output, gas_left, status_code) = _vm.execute(
+                Box::new(context),
+                Revision::EVMC_BYZANTIUM,
+                call_kind,
+                false,
+                depth,
+                gas_limit.into(),
+                target.as_fixed_bytes(),
+                source.as_fixed_bytes(),
+                &data[..],
+                &value.into(),
+                &code,
+                &create2_salt,
+            );
+            println!("output {:?}", output);
+            println!("gas_left {:?}", gas_left);
+            println!("status_code {:?}", status_code);
+            return Ok(output.to_vec());
         }
-
-        let (retv, reason) = f(&mut executor);
-
-        let ret = match reason {
-            ExitReason::Succeed(_) => Ok(retv),
-            ExitReason::Error(_) => Err(Error::<T>::ExitReasonFailed),
-            ExitReason::Revert(_) => Err(Error::<T>::ExitReasonRevert),
-            ExitReason::Fatal(_) => Err(Error::<T>::ExitReasonFatal),
-        };
-
-        let actual_fee = executor.fee(gas_price);
-        executor.deposit(source, total_fee.saturating_sub(actual_fee));
-
-        let (values, logs) = executor.deconstruct();
-        backend.apply(values, logs, true);
-
-        ret
+        Ok(Vec::new())
     }
 }

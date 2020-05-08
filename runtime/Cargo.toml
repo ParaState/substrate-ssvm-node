@@ -7,7 +7,7 @@ name = 'node-template-runtime'
 repository = 'https://github.com/paritytech/substrate/'
 version = '2.0.0-alpha.5'
 
-[dependencies.evm]
+[dependencies.ssvm]
 default-features = false
 package = 'pallet-ssvm'
 path = '../pallets/ssvm'
@@ -157,7 +157,7 @@ std = [
     'system/std',
     'timestamp/std',
     'transaction-payment/std',
-    'evm/std',
+    'ssvm/std',
     'hash256-std-hasher/std',
     'sha3/std',
 ]

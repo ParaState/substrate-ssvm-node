@@ -3044,6 +3044,7 @@ dependencies = [
  "evm",
  "frame-support",
  "frame-system",
+ "hex",
  "pallet-balances",
  "pallet-timestamp",
  "parity-scale-codec",

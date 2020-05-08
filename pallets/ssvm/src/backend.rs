@@ -7,8 +7,14 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 use sp_core::{H160, H256, U256};
 use sp_runtime::traits::UniqueSaturatedInto;
+use sp_std::if_std;
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
+#[cfg(feature = "std")]
+use ssvm::{
+    Address, Bytes, Bytes32, CallKind, HostInterface, StatusCode, StorageStatus, ADDRESS_LENGTH,
+    BYTES32_LENGTH,
+};
 
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Default)]
 #[cfg_attr(feature = "std", derive(Debug, Serialize, Deserialize))]
@@ -183,5 +189,164 @@ impl<'vicinity, T: Trait> ApplyBackend for Backend<'vicinity, T> {
                 data: log.data,
             }));
         }
+    }
+}
+
+pub fn create_address(caller: H160, nonce: U256) -> H160 {
+    let mut stream = rlp::RlpStream::new_list(2);
+    stream.append(&caller);
+    stream.append(&nonce);
+    H256::from_slice(Keccak256::digest(&stream.out()).as_slice()).into()
+}
+
+pub struct TxContext {
+    tx_gas_price: U256,
+    tx_origin: H160,
+    block_coinbase: H160,
+    block_number: i64,
+    block_timestamp: i64,
+    block_gas_limit: i64,
+    block_difficulty: U256,
+    chain_id: U256,
+}
+
+impl TxContext {
+    pub fn new(
+        tx_gas_price: U256,
+        tx_origin: H160,
+        block_coinbase: H160,
+        block_number: i64,
+        block_timestamp: i64,
+        block_gas_limit: i64,
+        block_difficulty: U256,
+        chain_id: U256,
+    ) -> Self {
+        Self {
+            tx_gas_price,
+            tx_origin,
+            block_coinbase,
+            block_number,
+            block_timestamp,
+            block_gas_limit,
+            block_difficulty,
+            chain_id,
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+pub struct HostContext<T> {
+    tx_context: TxContext,
+    _marker: PhantomData<T>,
+}
+
+#[cfg(feature = "std")]
+impl<T> HostContext<T> {
+    pub fn new(tx_context: TxContext) -> Self {
+        Self {
+            tx_context,
+            _marker: PhantomData,
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T: Trait> HostInterface for HostContext<T> {
+    fn account_exists(&mut self, _addr: &[u8; 20]) -> bool {
+        println!("Host: account_exists");
+        return true;
+    }
+    fn get_storage(&mut self, address: &Address, key: &Bytes32) -> Bytes32 {
+        println!("Host: get_storage {:?}", hex::encode(address));
+        let ret = AccountStorages::get(H160::from(address.to_owned()), H256::from(key.to_owned()));
+        println!(
+            "{:?} -> {:?}",
+            hex::encode(key),
+            hex::encode(ret.as_fixed_bytes())
+        );
+        ret.to_fixed_bytes()
+    }
+    fn set_storage(&mut self, address: &Address, key: &Bytes32, value: &Bytes32) -> StorageStatus {
+        println!("Host: set_storage {:?}", hex::encode(address));
+        println!("{:?} -> {:?}", hex::encode(key), hex::encode(value));
+
+        AccountStorages::insert(
+            H160::from(address.to_owned()),
+            H256::from(key.to_owned()),
+            H256::from(value.to_owned()),
+        );
+        StorageStatus::EVMC_STORAGE_MODIFIED
+    }
+    fn get_balance(&mut self, address: &Address) -> Bytes32 {
+        let balance = Accounts::get(H160::from(address.to_owned())).balance;
+        println!("Host: get_balance {:?}", hex::encode(address));
+        println!("balance[{:?}] = {:?}", hex::encode(address), balance);
+        balance.into()
+    }
+    fn get_code_size(&mut self, _addr: &Address) -> usize {
+        println!("Host: get_code_size");
+        return 0;
+    }
+    fn get_code_hash(&mut self, _addr: &Address) -> Bytes32 {
+        println!("Host: get_code_hash");
+        return [0u8; BYTES32_LENGTH];
+    }
+    fn copy_code(
+        &mut self,
+        _addr: &Address,
+        _offset: &usize,
+        _buffer_data: &*mut u8,
+        _buffer_size: &usize,
+    ) -> usize {
+        println!("Host: copy_code");
+        return 0;
+    }
+    fn selfdestruct(&mut self, _addr: &Address, _beneficiary: &Address) {
+        println!("Host: selfdestruct");
+    }
+    fn get_tx_context(&mut self) -> (Bytes32, Address, Address, i64, i64, i64, Bytes32) {
+        println!("Host: get_tx_context");
+        (
+            self.tx_context.tx_gas_price.into(),
+            self.tx_context.tx_origin.to_fixed_bytes(),
+            self.tx_context.block_coinbase.to_fixed_bytes(),
+            self.tx_context.block_number,
+            self.tx_context.block_timestamp,
+            self.tx_context.block_gas_limit,
+            self.tx_context.block_difficulty.into(),
+        )
+    }
+    fn get_block_hash(&mut self, _number: i64) -> Bytes32 {
+        println!("Host: get_block_hash");
+        return [0u8; BYTES32_LENGTH];
+    }
+    fn emit_log(&mut self, address: &Address, topics: &Vec<Bytes32>, data: &Bytes) {
+        Module::<T>::deposit_event(Event::Log(Log {
+            address: H160::from(address.to_owned()),
+            topics: topics
+                .iter()
+                .map(|b32| H256::from(b32))
+                .collect::<Vec<H256>>(),
+            data: data.to_vec(),
+        }));
+    }
+    fn call(
+        &mut self,
+        _kind: CallKind,
+        _destination: &Address,
+        _sender: &Address,
+        _value: &Bytes32,
+        _input: &[u8],
+        _gas: i64,
+        _depth: i32,
+        _is_static: bool,
+    ) -> (Vec<u8>, i64, Address, StatusCode) {
+        println!("Host: call");
+        return (
+            vec![0u8],
+            0,
+            [0u8; ADDRESS_LENGTH],
+            StatusCode::EVMC_SUCCESS,
+        );
     }
 }

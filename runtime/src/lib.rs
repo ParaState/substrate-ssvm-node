@@ -8,7 +8,10 @@
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
-use evm::{FeeCalculator, HashTruncateConvertAccountId};
+pub use balances::Call as BalancesCall;
+pub use frame_support::{
+    construct_runtime, parameter_types, traits::Randomness, weights::Weight, StorageValue,
+};
 use grandpa::fg_primitives;
 use grandpa::AuthorityList as GrandpaAuthorityList;
 use hash256_std_hasher::Hash256StdHasher;
@@ -19,26 +22,20 @@ use sp_core::{Hasher, OpaqueMetadata};
 use sp_runtime::traits::{
     BlakeTwo256, Block as BlockT, ConvertInto, IdentifyAccount, IdentityLookup, Verify,
 };
+#[cfg(any(feature = "std", test))]
+pub use sp_runtime::BuildStorage;
 use sp_runtime::{
     create_runtime_str, generic, impl_opaque_keys, transaction_validity::TransactionValidity,
     ApplyExtrinsicResult, MultiSignature,
 };
+pub use sp_runtime::{Perbill, Permill};
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
-
-// A few exports that help ease life for downstream crates.
-pub use balances::Call as BalancesCall;
-pub use frame_support::{
-    construct_runtime, parameter_types, traits::Randomness, weights::Weight, StorageValue,
-};
-#[cfg(any(feature = "std", test))]
-pub use sp_runtime::BuildStorage;
-pub use sp_runtime::{Perbill, Permill};
+pub use ssvm::Account as SSVMAccount;
+use ssvm::HashTruncateConvertAccountId;
 pub use timestamp::Call as TimestampCall;
-
-pub use evm::Account as EVMAccount;
 
 /// An index to a block.
 pub type BlockNumber = u32;
@@ -66,8 +63,7 @@ pub type Hash = sp_core::H256;
 /// Digest item type.
 pub type DigestItem = generic::DigestItem<Hash>;
 
-/// EVM struct
-pub struct FixedGasPrice;
+/// SSVM struct
 pub struct Sha3Hasher;
 impl Hasher for Sha3Hasher {
     type Out = sp_core::H256;
@@ -233,18 +229,10 @@ impl sudo::Trait for Runtime {
     type Call = Call;
 }
 
-impl FeeCalculator for FixedGasPrice {
-    fn min_gas_price() -> sp_core::U256 {
-        1.into()
-    }
-}
-
-impl evm::Trait for Runtime {
-    type FeeCalculator = FixedGasPrice;
+impl ssvm::Trait for Runtime {
     type ConvertAccountId = HashTruncateConvertAccountId<Sha3Hasher>;
     type Currency = Balances;
     type Event = Event;
-    type Precompiles = ();
 }
 
 construct_runtime!(
@@ -261,7 +249,7 @@ construct_runtime!(
         Balances: balances::{Module, Call, Storage, Config<T>, Event<T>},
         TransactionPayment: transaction_payment::{Module, Storage},
         Sudo: sudo::{Module, Call, Config<T>, Storage, Event<T>},
-        EVM: evm::{Module, Config, Call, Storage, Event},
+        SSVM: ssvm::{Module, Config, Call, Storage, Event},
     }
 );
 

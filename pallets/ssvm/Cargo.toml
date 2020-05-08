@@ -23,6 +23,7 @@ rlp = { version = "0.4", default-features = false }
 evm = { version = "0.16", default-features = false }
 sha3 = { version = "0.8", default-features = false }
 ssvm = { optional = true, package = "rust-ssvm", path = "../../../rust-ssvm" }
+hex = "^0.4"
 
 [features]
 default = ["std"]
