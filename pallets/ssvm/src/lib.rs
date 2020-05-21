@@ -215,15 +215,11 @@ decl_module! {
                     nonce,
                     CallKind::EVMC_CALL,
                 )?;
-
-                Module::<T>::deposit_event(Event::Nonce(nonce));
-                Module::<T>::deposit_event(Event::Call(target));
-                Module::<T>::deposit_event(Event::Output(result.to_owned()));
-                // Module::<T>::deposit_event(Event::LogMessage(hex::encode(result.to_owned())));
-
                 Accounts::mutate(&source, |account| {
                     account.nonce += U256::one();
                 });
+                Module::<T>::deposit_event(Event::Call(target));
+                Module::<T>::deposit_event(Event::Output(result.to_owned()));
             }
             Ok(())
         }
@@ -252,16 +248,11 @@ decl_module! {
                     nonce,
                     CallKind::EVMC_CREATE,
                 )?;
-
-                Module::<T>::deposit_event(Event::Nonce(nonce));
-                Module::<T>::deposit_event(Event::Create(created_address));
-                Module::<T>::deposit_event(Event::Output(output.to_owned()));
-                // Module::<T>::deposit_event(Event::LogMessage(hex::encode(output.to_owned())));
-
                 Accounts::mutate(&source, |account| {
                     account.nonce += U256::one();
                 });
                 AccountCodes::insert(created_address, output.to_owned());
+                Module::<T>::deposit_event(Event::Create(created_address));
             }
             Ok(())
         }
@@ -364,8 +355,8 @@ impl<T: Trait> Module<T> {
         let context = HostContext::<T>::new(tx_context);
         let depth = 0;
         let create2_salt = [0u8; 32];
-        let _vm = ssvm::create();
-        let (output, gas_left, status_code) = _vm.execute(
+        let vm = ssvm::create();
+        let (output, gas_left, status_code) = vm.execute(
             Box::new(context),
             Revision::EVMC_BYZANTIUM,
             call_kind,

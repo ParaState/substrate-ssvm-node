@@ -254,7 +254,7 @@ impl<T> HostContext<T> {
 impl<T: Trait> HostInterface for HostContext<T> {
     fn account_exists(&mut self, _addr: &[u8; 20]) -> bool {
         println!("Host: account_exists");
-        return true;
+        true
     }
     fn get_storage(&mut self, address: &Address, key: &Bytes32) -> Bytes32 {
         println!("Host: get_storage {:?}", hex::encode(address));
@@ -283,13 +283,12 @@ impl<T: Trait> HostInterface for HostContext<T> {
         println!("balance[{:?}] = {:?}", hex::encode(address), balance);
         balance.into()
     }
-    fn get_code_size(&mut self, _addr: &Address) -> usize {
-        println!("Host: get_code_size");
-        return 0;
+    fn get_code_size(&mut self, address: &Address) -> usize {
+        AccountCodes::decode_len(H160::from(address)).unwrap_or(0)
     }
-    fn get_code_hash(&mut self, _addr: &Address) -> Bytes32 {
-        println!("Host: get_code_hash");
-        return [0u8; BYTES32_LENGTH];
+    fn get_code_hash(&mut self, address: &Address) -> Bytes32 {
+        H256::from_slice(Keccak256::digest(&AccountCodes::get(H160::from(address))).as_slice())
+            .into()
     }
     fn copy_code(
         &mut self,
@@ -316,9 +315,14 @@ impl<T: Trait> HostInterface for HostContext<T> {
             self.tx_context.block_difficulty.into(),
         )
     }
-    fn get_block_hash(&mut self, _number: i64) -> Bytes32 {
-        println!("Host: get_block_hash");
-        return [0u8; BYTES32_LENGTH];
+    fn get_block_hash(&mut self, block_number: i64) -> Bytes32 {
+        let number = U256::from(block_number);
+        if number > U256::from(u32::max_value()) {
+            H256::default().into()
+        } else {
+            let number = T::BlockNumber::from(number.as_u32());
+            H256::from_slice(frame_system::Module::<T>::block_hash(number).as_ref()).into()
+        }
     }
     fn emit_log(&mut self, address: &Address, topics: &Vec<Bytes32>, data: &Bytes) {
         Module::<T>::deposit_event(Event::Log(Log {
