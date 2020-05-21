@@ -32,6 +32,7 @@ use frame_support::weights::SimpleDispatchInfo;
 use frame_support::weights::{DispatchClass, FunctionOf, Weight};
 use frame_support::{decl_error, decl_event, decl_module, decl_storage, ensure};
 use frame_system::{self as system, ensure_signed};
+use sha2::Sha256;
 use sha3::{Digest, Keccak256};
 use sp_core::{Hasher, H160, H256, U256};
 use sp_runtime::ModuleId;
@@ -42,7 +43,7 @@ use sp_runtime::{
 use sp_std::convert::TryInto;
 use sp_std::{if_std, marker::PhantomData, vec::Vec};
 #[cfg(feature = "std")]
-use ssvm::{CallKind, Revision};
+use ssvm::{CallKind, Revision, StatusCode, BYTES32_LENGTH};
 
 const MODULE_ID: ModuleId = ModuleId(*b"ssvmmoid");
 
@@ -114,7 +115,7 @@ decl_event! {
         Call(H160),
         Output(Vec<u8>),
         Log(Log),
-        LogMessage(String),
+        // LogMessage(String),
     }
 }
 
@@ -200,28 +201,30 @@ decl_module! {
             gas_limit: u32,
             gas_price: U256,
         ) -> DispatchResult {
-            let sender = ensure_signed(origin)?;
-            let source = T::ConvertAccountId::convert_account_id(&sender);
-            let nonce = Accounts::get(&source).nonce;
-            let result = Self::execute_ssvm(
-                source,
-                target,
-                value,
-                input,
-                gas_limit,
-                gas_price,
-                nonce,
-                CallKind::EVMC_CALL,
-            )?;
+            if_std!{
+                let sender = ensure_signed(origin)?;
+                let source = T::ConvertAccountId::convert_account_id(&sender);
+                let nonce = Accounts::get(&source).nonce;
+                let (result, gas_left, status_code) = Self::execute_ssvm(
+                    source,
+                    target,
+                    value,
+                    input,
+                    gas_limit,
+                    gas_price,
+                    nonce,
+                    CallKind::EVMC_CALL,
+                )?;
 
-            Module::<T>::deposit_event(Event::Nonce(nonce));
-            Module::<T>::deposit_event(Event::Call(target));
-            Module::<T>::deposit_event(Event::Output(result.to_owned()));
-            Module::<T>::deposit_event(Event::LogMessage(hex::encode(result.to_owned())));
+                Module::<T>::deposit_event(Event::Nonce(nonce));
+                Module::<T>::deposit_event(Event::Call(target));
+                Module::<T>::deposit_event(Event::Output(result.to_owned()));
+                // Module::<T>::deposit_event(Event::LogMessage(hex::encode(result.to_owned())));
 
-            Accounts::mutate(&source, |account| {
-                account.nonce += U256::one();
-            });
+                Accounts::mutate(&source, |account| {
+                    account.nonce += U256::one();
+                });
+            }
             Ok(())
         }
 
@@ -234,31 +237,32 @@ decl_module! {
             gas_limit: u32,
             gas_price: U256,
         ) -> DispatchResult {
-            let sender = ensure_signed(origin)?;
-            let source = T::ConvertAccountId::convert_account_id(&sender);
-            let nonce = Accounts::get(&source).nonce;
-            let created_address = create_address(source, nonce);
-            let output = Self::execute_ssvm(
-                source,
-                created_address,
-                value,
-                code,
-                gas_limit,
-                gas_price,
-                nonce,
-                CallKind::EVMC_CREATE,
-            )?;
+            if_std!{
+                let sender = ensure_signed(origin)?;
+                let source = T::ConvertAccountId::convert_account_id(&sender);
+                let nonce = Accounts::get(&source).nonce;
+                let created_address = create_address(source, nonce);
+                let (output, gas_left, status_code) = Self::execute_ssvm(
+                    source,
+                    created_address,
+                    value,
+                    code,
+                    gas_limit,
+                    gas_price,
+                    nonce,
+                    CallKind::EVMC_CREATE,
+                )?;
 
-            Module::<T>::deposit_event(Event::Nonce(nonce));
-            Module::<T>::deposit_event(Event::Create(created_address));
-            Module::<T>::deposit_event(Event::Output(output.to_owned()));
-            Module::<T>::deposit_event(Event::LogMessage(hex::encode(output.to_owned())));
+                Module::<T>::deposit_event(Event::Nonce(nonce));
+                Module::<T>::deposit_event(Event::Create(created_address));
+                Module::<T>::deposit_event(Event::Output(output.to_owned()));
+                // Module::<T>::deposit_event(Event::LogMessage(hex::encode(output.to_owned())));
 
-            Accounts::mutate(&source, |account| {
-                account.nonce += U256::one();
-            });
-            AccountCodes::insert(created_address, output.to_owned());
-
+                Accounts::mutate(&source, |account| {
+                    account.nonce += U256::one();
+                });
+                AccountCodes::insert(created_address, output.to_owned());
+            }
             Ok(())
         }
     }
@@ -292,7 +296,30 @@ impl<T: Trait> Module<T> {
         AccountStorages::remove_prefix(address);
     }
 
+    /// Execute precompiles contract.
+    #[cfg(feature = "std")]
+    fn execute_precompiles(
+        target: &H160,
+        value: &U256,
+        data: &Vec<u8>,
+        gas_limit: &u32,
+        gas_price: &U256,
+    ) -> (bool, Vec<u8>, i64) {
+        match &hex::encode(target)[..] {
+            "0000000000000000000000000000000000000002" => {
+                return (true, Sha256::digest(&data).to_vec(), *gas_limit as i64);
+            }
+            "0000000000000000000000000000000000000009" => {
+                return (true, Keccak256::digest(&data).to_vec(), *gas_limit as i64);
+            }
+            _ => {
+                return (false, vec![0u8], *gas_limit as i64);
+            }
+        }
+    }
+
     /// Execute SSVM.
+    #[cfg(feature = "std")]
     fn execute_ssvm(
         source: H160,
         target: H160,
@@ -302,52 +329,59 @@ impl<T: Trait> Module<T> {
         gas_price: U256,
         nonce: U256,
         call_kind: CallKind,
-    ) -> Result<Vec<u8>, Error<T>> {
-        if_std! {
-            // No coinbase, difficulty in substrate nodes.
-            let coinbase = H160::zero();
-            let difficulty = U256::zero();
-            let chain_id = U256::from(sp_io::misc::chain_id());
-            let block_number: u128 = frame_system::Module::<T>::block_number().unique_saturated_into();
-            let timestamp: u128 = pallet_timestamp::Module::<T>::get().unique_saturated_into();
-            let code = match call_kind {
-                CallKind::EVMC_CALL => AccountCodes::get(&target),
-                CallKind::EVMC_CREATE => data.to_owned(),
-                _ => data.to_owned(),
-            };
-            let tx_context = TxContext::new(
-                gas_price,
-                source,
-                coinbase,
-                block_number.try_into().unwrap(),
-                timestamp.try_into().unwrap(),
-                gas_limit.into(),
-                difficulty,
-                chain_id,
-            );
-            let context = HostContext::<T>::new(tx_context);
-            let depth = 0;
-            let create2_salt = [0u8; 32];
-            let _vm = ssvm::create();
-            let (output, gas_left, status_code) = _vm.execute(
-                Box::new(context),
-                Revision::EVMC_BYZANTIUM,
-                call_kind,
-                false,
-                depth,
-                gas_limit.into(),
-                target.as_fixed_bytes(),
-                source.as_fixed_bytes(),
-                &data[..],
-                &value.into(),
-                &code,
-                &create2_salt,
-            );
-            println!("output {:?}", output);
+    ) -> Result<(Vec<u8>, i64, StatusCode), Error<T>> {
+        // No coinbase, difficulty in substrate nodes.
+        let coinbase = H160::zero();
+        let difficulty = U256::zero();
+        let chain_id = U256::from(sp_io::misc::chain_id());
+        let block_number: u128 = frame_system::Module::<T>::block_number().unique_saturated_into();
+        let timestamp: u128 = pallet_timestamp::Module::<T>::get().unique_saturated_into();
+
+        let (is_precompiles, output, gas_left) =
+            Self::execute_precompiles(&target, &value, &data, &gas_limit, &gas_price);
+        if is_precompiles {
+            println!("is_precompiles {:?}", is_precompiles);
+            println!("output {:?}", hex::encode(&output));
             println!("gas_left {:?}", gas_left);
-            println!("status_code {:?}", status_code);
-            return Ok(output.to_vec());
+            return Ok((output.to_vec(), gas_left, StatusCode::EVMC_SUCCESS));
         }
-        Ok(Vec::new())
+
+        let code = match call_kind {
+            CallKind::EVMC_CALL => AccountCodes::get(&target),
+            CallKind::EVMC_CREATE => data.to_owned(),
+            _ => data.to_owned(),
+        };
+        let tx_context = TxContext::new(
+            gas_price,
+            source,
+            coinbase,
+            block_number.try_into().unwrap(),
+            timestamp.try_into().unwrap(),
+            gas_limit.into(),
+            difficulty,
+            chain_id,
+        );
+        let context = HostContext::<T>::new(tx_context);
+        let depth = 0;
+        let create2_salt = [0u8; 32];
+        let _vm = ssvm::create();
+        let (output, gas_left, status_code) = _vm.execute(
+            Box::new(context),
+            Revision::EVMC_BYZANTIUM,
+            call_kind,
+            false,
+            depth,
+            gas_limit.into(),
+            target.as_fixed_bytes(),
+            source.as_fixed_bytes(),
+            &data[..],
+            &value.into(),
+            &code,
+            &create2_salt,
+        );
+        println!("output {:?}", hex::encode(output));
+        println!("gas_left {:?}", gas_left);
+        println!("status_code {:?}", status_code);
+        return Ok((output.to_vec(), gas_left, status_code));
     }
 }

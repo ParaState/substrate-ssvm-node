@@ -342,11 +342,17 @@ impl<T: Trait> HostInterface for HostContext<T> {
         _is_static: bool,
     ) -> (Vec<u8>, i64, Address, StatusCode) {
         println!("Host: call");
-        return (
-            vec![0u8],
-            0,
-            [0u8; ADDRESS_LENGTH],
-            StatusCode::EVMC_SUCCESS,
-        );
+        let (output, gas_left, status_code) = Module::<T>::execute_ssvm(
+            _sender.into(),
+            _destination.into(),
+            _value.into(),
+            _input.to_vec(),
+            _gas as u32,
+            self.tx_context.tx_gas_price.into(),
+            Accounts::get(H160::from(_sender)).nonce,
+            _kind,
+        )
+        .unwrap();
+        return (output, gas_left, [0u8; ADDRESS_LENGTH], status_code);
     }
 }

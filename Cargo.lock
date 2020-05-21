@@ -3052,6 +3052,7 @@ dependencies = [
  "rlp",
  "rust-ssvm",
  "serde",
+ "sha2",
  "sha3",
  "sp-core",
  "sp-io",
