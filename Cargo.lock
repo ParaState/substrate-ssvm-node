@@ -3045,6 +3045,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "hex",
+ "lazy_static",
  "pallet-balances",
  "pallet-timestamp",
  "parity-scale-codec",

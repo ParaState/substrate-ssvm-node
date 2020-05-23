@@ -25,6 +25,7 @@ sha2 = { version = "0.8", default-features = false }
 sha3 = { version = "0.8", default-features = false }
 ssvm = { optional = true, package = "rust-ssvm", path = "../../../rust-ssvm" }
 hex = "^0.4"
+lazy_static = { version ="1.4.0"}
 
 [features]
 default = ["std"]

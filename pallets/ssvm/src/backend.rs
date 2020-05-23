@@ -258,7 +258,8 @@ impl<T: Trait> HostInterface for HostContext<T> {
     }
     fn get_storage(&mut self, address: &Address, key: &Bytes32) -> Bytes32 {
         println!("Host: get_storage {:?}", hex::encode(address));
-        let ret = AccountStorages::get(H160::from(address.to_owned()), H256::from(key.to_owned()));
+        let ret =
+            Module::<T>::get_storage(H160::from(address.to_owned()), H256::from(key.to_owned()));
         println!(
             "{:?} -> {:?}",
             hex::encode(key),
@@ -269,8 +270,7 @@ impl<T: Trait> HostInterface for HostContext<T> {
     fn set_storage(&mut self, address: &Address, key: &Bytes32, value: &Bytes32) -> StorageStatus {
         println!("Host: set_storage {:?}", hex::encode(address));
         println!("{:?} -> {:?}", hex::encode(key), hex::encode(value));
-
-        AccountStorages::insert(
+        Module::<T>::set_storage(
             H160::from(address.to_owned()),
             H256::from(key.to_owned()),
             H256::from(value.to_owned()),

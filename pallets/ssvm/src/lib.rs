@@ -32,6 +32,8 @@ use frame_support::weights::SimpleDispatchInfo;
 use frame_support::weights::{DispatchClass, FunctionOf, Weight};
 use frame_support::{decl_error, decl_event, decl_module, decl_storage, ensure};
 use frame_system::{self as system, ensure_signed};
+#[cfg(feature = "std")]
+use lazy_static::lazy_static;
 use sha2::Sha256;
 use sha3::{Digest, Keccak256};
 use sp_core::{Hasher, H160, H256, U256};
@@ -43,9 +45,12 @@ use sp_runtime::{
 use sp_std::convert::TryInto;
 use sp_std::{if_std, marker::PhantomData, vec::Vec};
 #[cfg(feature = "std")]
-use ssvm::{CallKind, Revision, StatusCode, BYTES32_LENGTH};
-
+use ssvm::{CallKind, Revision, StatusCode, StorageStatus};
+#[cfg(feature = "std")]
+use std::collections::HashMap;
 const MODULE_ID: ModuleId = ModuleId(*b"ssvmmoid");
+#[cfg(feature = "std")]
+use std::sync::Mutex;
 
 /// Type alias for currency balance.
 pub type BalanceOf<T> =
@@ -215,6 +220,12 @@ decl_module! {
                     nonce,
                     CallKind::EVMC_CALL,
                 )?;
+
+                if status_code == StatusCode::EVMC_SUCCESS {
+                    Self::sync_storage();
+                }
+                Self::drop_storage_cache();
+
                 Accounts::mutate(&source, |account| {
                     account.nonce += U256::one();
                 });
@@ -248,6 +259,12 @@ decl_module! {
                     nonce,
                     CallKind::EVMC_CREATE,
                 )?;
+
+                if status_code == StatusCode::EVMC_SUCCESS {
+                    Self::sync_storage();
+                }
+                Self::drop_storage_cache();
+
                 Accounts::mutate(&source, |account| {
                     account.nonce += U256::one();
                 });
@@ -257,6 +274,11 @@ decl_module! {
             Ok(())
         }
     }
+}
+
+#[cfg(feature = "std")]
+lazy_static::lazy_static! {
+    static ref STORAGE_CACHE:Mutex<HashMap<(H160, H256), H256>> = Mutex::new(HashMap::new());
 }
 
 impl<T: Trait> Module<T> {
@@ -285,6 +307,42 @@ impl<T: Trait> Module<T> {
         Accounts::remove(address);
         AccountCodes::remove(address);
         AccountStorages::remove_prefix(address);
+    }
+
+    /// Get storage value through storage cache
+    #[cfg(feature = "std")]
+    fn get_storage(address: H160, key: H256) -> H256 {
+        if !STORAGE_CACHE.lock().unwrap().contains_key(&(address, key)) {
+            let value = AccountStorages::get(H160::from(address), H256::from(key));
+            STORAGE_CACHE.lock().unwrap().insert((address, key), value);
+        }
+        STORAGE_CACHE
+            .lock()
+            .unwrap()
+            .get(&(address, key))
+            .unwrap()
+            .to_owned()
+    }
+
+    /// Set storage value to storage cache
+    #[cfg(feature = "std")]
+    fn set_storage(address: H160, key: H256, value: H256) -> StorageStatus {
+        STORAGE_CACHE.lock().unwrap().insert((address, key), value);
+        StorageStatus::EVMC_STORAGE_MODIFIED
+    }
+
+    /// Drop storage cache
+    #[cfg(feature = "std")]
+    fn drop_storage_cache() {
+        STORAGE_CACHE.lock().unwrap().clear();
+    }
+
+    /// Sync storage cache to storage
+    #[cfg(feature = "std")]
+    fn sync_storage() {
+        for (key, val) in STORAGE_CACHE.lock().unwrap().iter() {
+            AccountStorages::insert(key.0, key.1, val);
+        }
     }
 
     /// Execute precompiles contract.
