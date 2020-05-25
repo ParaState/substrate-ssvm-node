@@ -10,7 +10,8 @@ version = '2.0.0-alpha.5'
 [dependencies.ssvm]
 default-features = false
 package = 'pallet-ssvm'
-path = '../pallets/ssvm'
+git = 'https://github.com/second-state/pallet-ssvm'
+rev = '1711c9c7add9af8e7498871a04ee3646ef7e69db'
 
 [dependencies.sha3]
 default-features = false

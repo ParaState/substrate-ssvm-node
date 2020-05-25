@@ -881,55 +881,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "evm"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23a5c0ebf219b2b878bde1838282e0bb69828338df37fd136f1e93182ae35a59"
+name = "evmc-client"
+version = "6.3.1"
+source = "git+https://github.com/second-state/evmc?tag=v6.3.1-rust-evmc-client#be88b608ad42dda01902e6f29fac0cf1098ce65e"
 dependencies = [
- "evm-core",
- "evm-gasometer",
- "evm-runtime",
- "primitive-types",
- "rlp",
- "serde",
- "sha3",
-]
-
-[[package]]
-name = "evm-core"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d944a07232006a3435df8aa014fd364ed04cb28d731782339e9c56436594f2d4"
-dependencies = [
- "primitive-types",
-]
-
-[[package]]
-name = "evm-gasometer"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a0d986953234d3786d0ca1beaaabab6a581d2128f8ec36c8c57e9c45e3d2b32"
-dependencies = [
- "evm-core",
- "evm-runtime",
- "primitive-types",
-]
-
-[[package]]
-name = "evm-runtime"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1833c22f9518007d3cc28e14ff586263543516a1c7a147b260c603e4deb95403"
-dependencies = [
- "evm-core",
- "primitive-types",
- "sha3",
+ "evmc-sys",
+ "libloading",
 ]
 
 [[package]]
 name = "evmc-sys"
 version = "6.3.1"
-source = "git+https://github.com/ethereum/evmc?tag=v6.3.1#e9d4648200d73c1ce63b74a33a50758db1fd48db"
+source = "git+https://github.com/second-state/evmc?tag=v6.3.1-rust-evmc-client#be88b608ad42dda01902e6f29fac0cf1098ce65e"
 dependencies = [
  "bindgen 0.51.1",
 ]
@@ -3040,8 +3003,8 @@ dependencies = [
 [[package]]
 name = "pallet-ssvm"
 version = "0.0.1"
+source = "git+https://github.com/second-state/pallet-ssvm?rev=1711c9c7add9af8e7498871a04ee3646ef7e69db#1711c9c7add9af8e7498871a04ee3646ef7e69db"
 dependencies = [
- "evm",
  "frame-support",
  "frame-system",
  "hex",
@@ -3843,10 +3806,11 @@ dependencies = [
 [[package]]
 name = "rust-ssvm"
 version = "0.0.1"
+source = "git+https://github.com/second-state/rust-ssvm?rev=d236b8ea4eb13be1918a48203cfb2fb649524792#d236b8ea4eb13be1918a48203cfb2fb649524792"
 dependencies = [
  "clap",
  "cmake",
- "evmc-sys",
+ "evmc-client",
  "hex",
  "libloading",
 ]
