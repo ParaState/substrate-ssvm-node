@@ -292,16 +292,39 @@ checksum = "b41b7ea54a0c9d92199de89e20e58d49f02f8e699814ef3fdf266f6f748d15c7"
 
 [[package]]
 name = "bindgen"
-version = "0.53.2"
+version = "0.51.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bb26d6a69a335b8cb0e7c7e9775cd5666611dc50a37177c3f2cedcfc040e8c8"
+checksum = "ebd71393f1ec0509b553aa012b9b58e81dadbdff7130bd3b8cba576e69b32f75"
 dependencies = [
  "bitflags",
  "cexpr",
  "cfg-if",
  "clang-sys",
  "clap",
- "env_logger",
+ "env_logger 0.6.2",
+ "lazy_static",
+ "log",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "which",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99de13bb6361e01e493b3db7928085dcc474b7ba4f5481818e53a89d76b8393f"
+dependencies = [
+ "bitflags",
+ "cexpr",
+ "cfg-if",
+ "clang-sys",
+ "clap",
+ "env_logger 0.7.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -477,9 +500,9 @@ dependencies = [
 
 [[package]]
 name = "cexpr"
-version = "0.4.0"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4aedb84272dbe89af497cf81375129abda4fc0a9e7c5d317498c15cc30c0d27"
+checksum = "fce5b5fb86b0c57c20c834c1b412fd09c77c8a59b9473f86272709e78874cd1d"
 dependencies = [
  "nom",
 ]
@@ -512,9 +535,9 @@ dependencies = [
 
 [[package]]
 name = "clang-sys"
-version = "0.29.2"
+version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f92986241798376849e1a007827041fed9bb36195822c2049d18e174420e0534"
+checksum = "81de550971c976f176130da4b2978d3b524eaa0fd9ac31f3ceb5ae1231fb4853"
 dependencies = [
  "glob",
  "libc",
@@ -552,6 +575,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "cmake"
+version = "0.1.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81fb25b677f8bf1eb325017cb6bb8452f87969db0fedb4f757b297bee78a7c62"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -782,6 +814,19 @@ checksum = "bb1f6b1ce1c140482ea30ddd3335fc0024ac7ee112895426e0a629a6c20adfe3"
 
 [[package]]
 name = "env_logger"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aafcde04e90a5226a6443b7aabdb016ba2f8307c847d524724bd9b346dd1a2d3"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
+name = "env_logger"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44533bbbb3bb3c1fa17d9f2e4e38bbbaf8396ba82193c4cb1b6445d711445d36"
@@ -833,6 +878,23 @@ dependencies = [
  "impl-serde 0.3.0",
  "primitive-types",
  "uint",
+]
+
+[[package]]
+name = "evmc-client"
+version = "6.3.1"
+source = "git+https://github.com/second-state/evmc?tag=v6.3.1-rust-evmc-client#be88b608ad42dda01902e6f29fac0cf1098ce65e"
+dependencies = [
+ "evmc-sys",
+ "libloading",
+]
+
+[[package]]
+name = "evmc-sys"
+version = "6.3.1"
+source = "git+https://github.com/second-state/evmc?tag=v6.3.1-rust-evmc-client#be88b608ad42dda01902e6f29fac0cf1098ce65e"
+dependencies = [
+ "bindgen 0.51.1",
 ]
 
 [[package]]
@@ -2360,7 +2422,7 @@ version = "6.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e3b727e2dd20ec2fb7ed93f23d9fd5328a0871185485ebdaff007b47d3e27e4"
 dependencies = [
- "bindgen",
+ "bindgen 0.53.1",
  "cc",
  "glob",
  "libc",
@@ -2640,6 +2702,7 @@ dependencies = [
  "futures 0.3.4",
  "log",
  "node-template-runtime",
+ "pallet-ssvm",
  "sc-basic-authorship",
  "sc-cli",
  "sc-client",
@@ -2669,16 +2732,18 @@ dependencies = [
  "frame-executive",
  "frame-support",
  "frame-system",
+ "hash256-std-hasher",
  "pallet-aura",
  "pallet-balances",
  "pallet-grandpa",
  "pallet-randomness-collective-flip",
+ "pallet-ssvm",
  "pallet-sudo",
- "pallet-template",
  "pallet-timestamp",
  "pallet-transaction-payment",
  "parity-scale-codec",
  "serde",
+ "sha3",
  "sp-api",
  "sp-block-builder",
  "sp-consensus-aura",
@@ -2708,12 +2773,12 @@ checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "nom"
-version = "5.1.1"
+version = "4.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b471253da97532da4b61552249c521e01e736071f71c1a4f7ebbfbf0a06aad6"
+checksum = "2ad2a91a8e869eeb30b9cb3119ae87773a8f4ae617f41b1eb9c154b2905f7bd6"
 dependencies = [
  "memchr",
- "version_check",
+ "version_check 0.1.5",
 ]
 
 [[package]]
@@ -2936,6 +3001,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-ssvm"
+version = "0.0.1"
+source = "git+https://github.com/second-state/pallet-ssvm?rev=1711c9c7add9af8e7498871a04ee3646ef7e69db#1711c9c7add9af8e7498871a04ee3646ef7e69db"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "hex",
+ "lazy_static",
+ "pallet-balances",
+ "pallet-timestamp",
+ "parity-scale-codec",
+ "primitive-types",
+ "rlp",
+ "rust-ssvm",
+ "serde",
+ "sha2",
+ "sha3",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
 name = "pallet-sudo"
 version = "2.0.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2948,19 +3037,6 @@ dependencies = [
  "sp-io",
  "sp-runtime",
  "sp-std",
-]
-
-[[package]]
-name = "pallet-template"
-version = "2.0.0-alpha.5"
-dependencies = [
- "frame-support",
- "frame-system",
- "parity-scale-codec",
- "safe-mix",
- "sp-core",
- "sp-io",
- "sp-runtime",
 ]
 
 [[package]]
@@ -3294,7 +3370,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
- "version_check",
+ "version_check 0.9.1",
 ]
 
 [[package]]
@@ -3307,7 +3383,7 @@ dependencies = [
  "quote",
  "syn",
  "syn-mid",
- "version_check",
+ "version_check 0.9.1",
 ]
 
 [[package]]
@@ -3728,6 +3804,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-ssvm"
+version = "0.0.1"
+source = "git+https://github.com/second-state/rust-ssvm?rev=d236b8ea4eb13be1918a48203cfb2fb649524792#d236b8ea4eb13be1918a48203cfb2fb649524792"
+dependencies = [
+ "clap",
+ "cmake",
+ "evmc-client",
+ "hex",
+ "libloading",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3918,7 +4006,7 @@ dependencies = [
  "chrono",
  "clap",
  "derive_more",
- "env_logger",
+ "env_logger 0.7.1",
  "fdlimit",
  "futures 0.3.4",
  "lazy_static",
@@ -6060,7 +6148,7 @@ version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50f37be617794602aabbeee0be4f259dc1778fabe05e2d67ee8f79326d5cb4f6"
 dependencies = [
- "version_check",
+ "version_check 0.9.1",
 ]
 
 [[package]]
@@ -6160,6 +6248,12 @@ dependencies = [
  "bitflags",
  "chrono",
 ]
+
+[[package]]
+name = "version_check"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "914b1a6776c4c929a602fafd8bc742e06365d4bcbe48c30f9cca5824f70dc9dd"
 
 [[package]]
 name = "version_check"
