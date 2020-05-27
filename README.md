@@ -1,107 +1,119 @@
-# Substrate Node Template
+# Substrate SSVM Node
 
-A new Substrate node, ready for hacking. This node includes:
 
-* A FRAME-based runtime
-* A template pallet
-* Aura block authoring
-* Grandpa finality gadget
+## Test
 
-## Build
+Apart from our intergeration demo before, we also provide an isolated ewasm test flow to test our SSVM with evmc.
 
-Install Rust:
+To get started with our test flow, you will need to prepare three components at first.
 
+1. [Testeth](https://github.com/ethereum/aleth.git) with version 1.6.0
+2. [Official ewasm test suite](https://github.com/ewasm/tests)
+3. [SSVM](https://github.com/second-state/SSVM) with version adopted by [rust-ssvm](https://github.com/second-state/rust-ssvm)
+
+- Fetch resource
 ```bash
-curl https://sh.rustup.rs -sSf | sh
+> git clone --branch v1.6.0 --recursive https://github.com/ethereum/aleth.git
+> git clone https://github.com/ewasm/tests.git
+> git clone --branch 0.5.0 https://github.com/second-state/SSVM.git
 ```
 
-Initialize your Wasm Build environment:
-
+- Copy EWASM test suite into Aleth test folder
 ```bash
-./scripts/init.sh
+> cp tests/GeneralStateTests/stEWASMTests/* aleth/test/jsontests/GeneralStateTests/stEWASMTests/.
+> cp tests/src/GeneralStateTestsFiller/stEWASMTests/* aleth/test/jsontests/src/GeneralStateTestsFiller/stEWASMTests/.
 ```
 
-Build Wasm and native code:
-
+- Into Docker container (reuse secondstate/ssvm docker-image)
 ```bash
-cargo build --release
+> docker run -it --rm \
+      -v $(pwd):/root/workspace \
+      -w /root/workspace \
+      secondstate/ssvm
 ```
 
-## Run
-
-### Single Node Development Chain
-
-Purge any existing developer chain state:
-
+- Build testeth inside Aleth
 ```bash
-./target/release/node-template purge-chain --dev
+(docker) cd aleth
+(docker) mkdir build; cd build  # Create a build directory.
+(docker) cmake ..               # Configure the project.
+(docker) cmake --build .        # Build all default targets.
+
 ```
 
-Start a development chain with:
-
+- Build SSVM
 ```bash
-./target/release/node-template --dev
+(docker) cd ../../SSVM
+(docker) mkdir -p build && cd build
+(docker) cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON .. && make
+
 ```
 
-Detailed logs may be shown by running the node with the following environment variables set: `RUST_LOG=debug RUST_BACKTRACE=1 cargo run -- --dev`.
-
-### Multi-Node Local Testnet
-
-If you want to see the multi-node consensus algorithm in action locally, then you can create a local testnet with two validator nodes for Alice and Bob, who are the initial authorities of the genesis chain that have been endowed with testnet units.
-
-Optionally, give each node a name and expose them so they are listed on the Polkadot [telemetry site](https://telemetry.polkadot.io/#/Local%20Testnet).
-
-You'll need two terminal windows open.
-
-We'll start Alice's substrate node first on default TCP port 30333 with her chain database stored locally at `/tmp/alice`. The bootnode ID of her node is `QmRpheLN4JWdAnY7HGJfWFNbfkQCb6tFf4vvA6hgjMZKrR`, which is generated from the `--node-key` value that we specify below:
-
+- Move vm library to test folder
 ```bash
-cargo run -- \
-  --base-path /tmp/alice \
-  --chain=local \
-  --alice \
-  --node-key 0000000000000000000000000000000000000000000000000000000000000001 \
-  --telemetry-url ws://telemetry.polkadot.io:1024 \
-  --validator
+(docker) cp tools/ssvm-evmc/libssvmEVMC.so ../../aleth/build/test/
 ```
 
-In the second terminal, we'll start Bob's substrate node on a different TCP port of 30334, and with his chain database stored locally at `/tmp/bob`. We'll specify a value for the `--bootnodes` option that will connect his node to Alice's bootnode ID on TCP port 30333:
-
+- Execute test
 ```bash
-cargo run -- \
-  --base-path /tmp/bob \
-  --bootnodes /ip4/127.0.0.1/tcp/30333/p2p/QmRpheLN4JWdAnY7HGJfWFNbfkQCb6tFf4vvA6hgjMZKrR \
-  --chain=local \
-  --bob \
-  --port 30334 \
-  --telemetry-url ws://telemetry.polkadot.io:1024 \
-  --validator
+(docker) cd ../../aleth/build/test/
+(docker) ./testeth -t GeneralStateTests/stEWASMTests -- --vm ./libssvmEVMC.so --singlenet "Byzantium"
 ```
 
-Additional CLI usage options are available and may be shown by running `cargo run -- --help`.
-
-## Advanced: Generate Your Own Substrate Node Template
-
-A substrate node template is always based on a certain version of Substrate. You can inspect it by
-opening [Cargo.toml](Cargo.toml) and see the template referred to a specific Substrate commit(
-`rev` field), branch, or version.
-
-You can generate your own Substrate node-template based on a particular Substrate
-version/commit by running following commands:
-
+- Result
 ```bash
-# git clone from the main Substrate repo
-git clone https://github.com/paritytech/substrate.git
-cd substrate
+Running tests using path: "../../test/jsontests"
+Running 1 test case...
+Test Case "stEWASMTests":
+2020-05-27 11:09:10,742 ERROR [default] Execution failed. Code: 23
+2020-05-27 11:09:10,753 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,756 ERROR [default] Execution failed. Code: 23
+/root/workspace/aleth/test/tools/libtesteth/ImportTest.cpp(768): error: in "GeneralStateTests/stEWASMTests": malformedBytecodeInvalidPreamble on Byzantium: Expected another postState hash! expected: 0x57693cf5e000607a5bf3ea9d721358cd9b5cd7f9cd3cbb7c40caf616ed7f5730 actual: 0xc47ac12abb7b3ac7f9333a6a542d5bcdd6958461846bf3f2b98275a88b969cd6 in Byzantium data: 0 gas: 0 val: 0
+2020-05-27 11:09:10,771 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,785 ERROR [default] Execution failed. Code: 25
+2020-05-27 11:09:10,793 ERROR [default] Execution failed. Code: 13
+2020-05-27 11:09:10,799 ERROR [default] Execution failed. Code: 31
+2020-05-27 11:09:10,805 ERROR [default] Execution failed. Code: 13
+2020-05-27 11:09:10,812 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,816 ERROR [default] Execution failed. Code: 13
+2020-05-27 11:09:10,822 ERROR [default] Execution failed. Code: 23
+24%...
+2020-05-27 11:09:10,833 ERROR [default] Execution failed. Code: 25
+2020-05-27 11:09:10,839 ERROR [default] Execution failed. Code: 31
+2020-05-27 11:09:10,841 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,847 ERROR [default] Execution failed. Code: 23
+2020-05-27 11:09:10,876 ERROR [default] Execution failed. Code: 23
+2020-05-27 11:09:10,879 ERROR [default] Execution failed. Code: 23
+2020-05-27 11:09:10,882 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,889 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,897 ERROR [default] Execution failed. Code: 19
+2020-05-27 11:09:10,908 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,915 ERROR [default] Execution failed. Code: 23
+49%...
+2020-05-27 11:09:10,918 ERROR [default] Execution failed. Code: 31
+2020-05-27 11:09:10,920 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,944 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,948 ERROR [default] Reverted.
+2020-05-27 11:09:10,965 ERROR [default] Execution failed. Code: 25
+2020-05-27 11:09:10,971 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,976 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,977 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,982 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:10,993 ERROR [default] Execution failed. Code: 13
+74%...
+2020-05-27 11:09:11,009 ERROR [default] Execution failed. Code: 13
+2020-05-27 11:09:11,011 ERROR [default] Execution failed. Code: 13
+2020-05-27 11:09:11,014 ERROR [default] Execution failed. Code: 23
+2020-05-27 11:09:11,069 ERROR [default] Execution failed. Code: 31
+2020-05-27 11:09:11,086 ERROR [default] Reverted.
+2020-05-27 11:09:11,095 ERROR [default] Execution failed. Code: 28
+2020-05-27 11:09:11,171 ERROR [default] Execution failed. Code: 28
+99%...
+2020-05-27 11:09:11,177 ERROR [default] Execution failed. Code: 31
+100%
 
-# Switch to a particular branch or commit of the Substrate repo your node-template based on
-git checkout <branch/tag/sha1>
-
-# Run the helper script to generate a node template.
-# This script compiles Substrate and takes a while to complete. It takes a relative file path
-#   from the current dir. to output the compressed node template.
-.maintain/node-template-release.sh ../node-template.tar.gz
+*** 1 failure is detected (5 failures are expected) in the test module "Master Test Suite"
 ```
 
-Noted though you will likely get faster and more thorough support if you stick with the releases
-provided in this repository.
+> **Known issue**  
+The only one mismatch test case `malformedBytecodeInvalidPreamble` is already fixed in SSVM@d3f4ebd and we will release next rust-ssvm cover the solution.
