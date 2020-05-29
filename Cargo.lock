@@ -3003,7 +3003,7 @@ dependencies = [
 [[package]]
 name = "pallet-ssvm"
 version = "0.0.1"
-source = "git+https://github.com/second-state/pallet-ssvm?rev=1711c9c7add9af8e7498871a04ee3646ef7e69db#1711c9c7add9af8e7498871a04ee3646ef7e69db"
+source = "git+https://github.com/second-state/pallet-ssvm?rev=c6b07ced021e89e3e1acd6a634aabe25297037f1#c6b07ced021e89e3e1acd6a634aabe25297037f1"
 dependencies = [
  "frame-support",
  "frame-system",
