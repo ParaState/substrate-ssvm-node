@@ -89,6 +89,7 @@ Again, start a new shell in the same docker container. Now we could deploy the w
 
 ```bash
 > docker exec -it ssvm bash
+(docker-3) cd ~/substrate-ssvm-node/erc20
 (docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js create -p 99 -g 5000000 -c 0x$(cat erc20.hex)
 ```
 
@@ -131,7 +132,7 @@ Get ERC20 balance of Alice:
 (docker-3) BOB=41dccbd49b26c50d34355ed86ff0fa9e489d1e01
 (docker-3) balanceOf=70a08231
 (docker-3) transfer=a9059cbb
-(docker-3) ~/substrate/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
+(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
    -a 0xe2a313e210a6ec1d5a9c0806545670f2e6264f86 \
    -d 0x${balanceOf}000000000000000000000000${ALICE}
 
@@ -148,7 +149,7 @@ The output shows Alice have 0x3e8 = 1000 ERC20 tokens.
 Now we could transfer 3 tokens from Alice to Bob:
 
 ```bash
-(docker-3) ~/substrate/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
+(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
    -a 0xe2a313e210a6ec1d5a9c0806545670f2e6264f86 \
    -d 0x${transfer}000000000000000000000000${BOB}0000000000000000000000000000000000000000000000000000000000000003
 
@@ -163,7 +164,7 @@ Now we could transfer 3 tokens from Alice to Bob:
 Check ERC20 balance of Alice again:
 
 ```bash
-(docker-3) ~/substrate/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
+(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
    -a 0xe2a313e210a6ec1d5a9c0806545670f2e6264f86 \
    -d 0x${balanceOf}000000000000000000000000${ALICE}
 
@@ -180,7 +181,7 @@ Alice have 0x3e5 = 997 ERC20 tokens.
 Check ERC20 balance of Bob:
 
 ```bash
-(docker-3) ~/substrate/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
+(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
    -a 0xe2a313e210a6ec1d5a9c0806545670f2e6264f86 \
    -d 0x70a08231000000000000000000000000${BOB}
 
