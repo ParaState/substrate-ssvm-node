@@ -11,7 +11,7 @@ version = '2.0.0-alpha.5'
 default-features = false
 package = 'pallet-ssvm'
 git = 'https://github.com/second-state/pallet-ssvm'
-rev = '1711c9c7add9af8e7498871a04ee3646ef7e69db'
+rev = 'c6b07ced021e89e3e1acd6a634aabe25297037f1'
 
 [dependencies.sha3]
 default-features = false
