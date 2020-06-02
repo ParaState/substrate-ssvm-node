@@ -3003,7 +3003,7 @@ dependencies = [
 [[package]]
 name = "pallet-ssvm"
 version = "0.0.1"
-source = "git+https://github.com/second-state/pallet-ssvm?rev=c6b07ced021e89e3e1acd6a634aabe25297037f1#c6b07ced021e89e3e1acd6a634aabe25297037f1"
+source = "git+https://github.com/second-state/pallet-ssvm?tag=v0.0.1#35f6f42c63d0721488dd3209f7ced948df317139"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -3806,7 +3806,7 @@ dependencies = [
 [[package]]
 name = "rust-ssvm"
 version = "0.0.1"
-source = "git+https://github.com/second-state/rust-ssvm?rev=d236b8ea4eb13be1918a48203cfb2fb649524792#d236b8ea4eb13be1918a48203cfb2fb649524792"
+source = "git+https://github.com/second-state/rust-ssvm?tag=v0.0.1#a26889703551447a95b9c18ab1a63fe3c87155d4"
 dependencies = [
  "clap",
  "cmake",
