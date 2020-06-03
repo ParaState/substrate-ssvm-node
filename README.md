@@ -25,32 +25,15 @@ and use [secondstate/ssvm](https://hub.docker.com/r/secondstate/ssvm) as buildin
 ```bash
 > docker run -it --rm \
   --name ssvm \
-  -v $(pwd):/root \
-  -w /root \
-  secondstate/ssvm:latest
-```
-
-In docker container, install rust yarn:
-
-- Install rust
-```bash
-(docker) curl https://sh.rustup.rs -sSf | sh -s -- -y
-(docker) source ~/.cargo/env
-(docker) rustup update nightly && rustup update stable
-(docker) rustup target add wasm32-unknown-unknown --toolchain nightly
-```
-
-- Install yarn
-```bash
-(docker) curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
-(docker) echo "deb https://dl.yarnpkg.com/debian/ stable main" > /etc/apt/sources.list.d/yarn.list
-(docker) apt update && apt install -y yarn
+  -v $(pwd):/root/node \
+  -w /root/node \
+  secondstate/substrate-ssvm
 ```
 
 Build substrate-cli-tools:
 
 ```bash
-(docker) cd ~/substrate-cli-tools/typescript
+(docker) cd ~/node/substrate-cli-tools/typescript
 (docker) yarn install && yarn run tsc
 (docker) chmod +x dist/*.js
 ```
@@ -58,7 +41,7 @@ Build substrate-cli-tools:
 Build substrate-ssvm-node:
 
 ```bash
-(docker) cd ~/substrate-ssvm-node
+(docker) cd ~/node/substrate-ssvm-node
 (docker) cargo build --release --verbose
 ```
 
@@ -75,8 +58,8 @@ You could also start a new shell in the same docker container and check RPC info
 
 ```bash
 > docker exec -it ssvm bash
-(docker-2) ~/substrate-cli-tools/typescript/dist/info.js
-(docker-2) ~/substrate-cli-tools/typescript/dist/events.js +ssvm
+(docker-2) ~/node/substrate-cli-tools/typescript/dist/info.js
+(docker-2) ~/node/substrate-cli-tools/typescript/dist/events.js +ssvm
 ```
 
 ## Deploy contract
@@ -100,8 +83,8 @@ Again, start a new shell in the same docker container. Now we could deploy the w
 
 ```bash
 > docker exec -it ssvm bash
-(docker-3) cd ~/substrate-ssvm-node/erc20
-(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js create -p 99 -g 5000000 -c 0x$(cat erc20.hex)
+(docker-3) cd ~/node/substrate-ssvm-node/erc20
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/ssvm.js create -p 99 -g 5000000 -c 0x$(cat erc20.hex)
 ```
 
 The contract will be deployed at address `0xe2a313e210a6ec1d5a9c0806545670f2e6264f86`.
@@ -118,11 +101,11 @@ You could check it from `(docker-2)` shell, which runs `events.js +ssvm`:
 You could check Ewasm addresses of Alice and Bob using `balances.js --svm`:
 
 ```bash
-(docker-3) ~/substrate-cli-tools/typescript/dist/balances.js --ssvm //Alice
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/balances.js --ssvm //Alice
 //Alice's SSVM address is 0x9621dde636de098b43efb0fa9b61facfe328f99d
 //Alice's balance is 1000000
 
-(docker-3) ~/substrate-cli-tools/typescript/dist/balances.js --ssvm //Bob
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/balances.js --ssvm //Bob
 //Bob's SSVM address is 0x41dccbd49b26c50d34355ed86ff0fa9e489d1e01
 //Bob's balance is 0
 ```
@@ -130,9 +113,9 @@ You could check Ewasm addresses of Alice and Bob using `balances.js --svm`:
 We'd like to call `balanceOf(address)` and `transfer(address,uint256)`. Use `ssvm.js selector` to get Ewasm function signature:
 
 ```bash
-(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js selector 'balanceOf(address)'
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/ssvm.js selector 'balanceOf(address)'
 0x70a08231
-(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js selector 'transfer(address,uint256)'
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/ssvm.js selector 'transfer(address,uint256)'
 0xa9059cbb
 ```
 
@@ -143,7 +126,7 @@ Get ERC20 balance of Alice:
 (docker-3) BOB=41dccbd49b26c50d34355ed86ff0fa9e489d1e01
 (docker-3) balanceOf=70a08231
 (docker-3) transfer=a9059cbb
-(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
    -a 0xe2a313e210a6ec1d5a9c0806545670f2e6264f86 \
    -d 0x${balanceOf}000000000000000000000000${ALICE}
 
@@ -160,7 +143,7 @@ The output shows Alice have 0x3e8 = 1000 ERC20 tokens.
 Now we could transfer 3 tokens from Alice to Bob:
 
 ```bash
-(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
    -a 0xe2a313e210a6ec1d5a9c0806545670f2e6264f86 \
    -d 0x${transfer}000000000000000000000000${BOB}0000000000000000000000000000000000000000000000000000000000000003
 
@@ -175,7 +158,7 @@ Now we could transfer 3 tokens from Alice to Bob:
 Check ERC20 balance of Alice again:
 
 ```bash
-(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
    -a 0xe2a313e210a6ec1d5a9c0806545670f2e6264f86 \
    -d 0x${balanceOf}000000000000000000000000${ALICE}
 
@@ -192,7 +175,7 @@ Alice have 0x3e5 = 997 ERC20 tokens.
 Check ERC20 balance of Bob:
 
 ```bash
-(docker-3) ~/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
+(docker-3) ~/node/substrate-cli-tools/typescript/dist/ssvm.js call -p 99 -g 5000000 \
    -a 0xe2a313e210a6ec1d5a9c0806545670f2e6264f86 \
    -d 0x70a08231000000000000000000000000${BOB}
 
