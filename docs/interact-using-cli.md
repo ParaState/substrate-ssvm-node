@@ -39,6 +39,7 @@ Build `substrate-cli-tools`:
 After building `substrate-ssvm-node`, we could start a Substrate node that supports Ewasm by our [pallet-ssvm](https://github.com/second-state/pallet-ssvm):
 
 ```bash
+(docker) cd ~/node/substrate-ssvm-node
 (docker) cargo run --release --bin node-template -- purge-chain --dev -y
 (docker) cargo run --release --bin node-template -- --dev
 ```
