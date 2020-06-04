@@ -12,7 +12,7 @@ We use [secondstate/substrate-ssvm](https://hub.docker.com/r/secondstate/substra
   -v $(pwd):/root/node \
   -w /root/node/substrate-ssvm-node \
   secondstate/substrate-ssvm:latest \
-  cargo run --release --bin node-template -- --dev
+  cargo run --release --bin node-template -- --dev --ws-external
 ```
 
 > **Remember to publish 9944 port from container to use Substrate web UI.**
