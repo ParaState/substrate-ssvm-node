@@ -57,13 +57,13 @@ Now we could use `substrate-cli-tools` to deploy Ewasm contract to our node.
 
 Here we use the following ERC20 contract files as an example:
 - [erc20.sol](./erc20/erc20.sol)
-    - This file is an ERC20 contract written in Solidity.
+  - This file is an ERC20 contract written in Solidity.
 - [erc20.wasm](./erc20/erc20.wasm)
-    - This file is a wasm file generate from `erc20.sol` by [SOLL](https://github.com/second-state/soll)
-    - Command to generate wasm file: `soll -deploy=Normal erc20.sol`
+  - This file is a wasm file generate from `erc20.sol` by [SOLL](https://github.com/second-state/soll)
+  - Command to generate wasm file: `soll -deploy=Normal erc20.sol`
 - [erc20.hex](./erc20/erc20.hex)
-    - To deploy wasm file to our node, we need to convert `erc20.wasm` to hex.
-    - Command to generate hex file: `xxd -p erc20.wasm | tr -d $'\n' > erc20.hex`
+  - To deploy wasm file to our node, we need to convert `erc20.wasm` to hex.
+  - Command to generate hex file: `xxd -p erc20.wasm | tr -d $'\n' > erc20.hex`
 
 Again, start a new shell in the same docker container. Now we could deploy the wasm bytecode to our node:
 
