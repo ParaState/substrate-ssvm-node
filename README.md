@@ -1,15 +1,14 @@
 # Substrate SSVM Node
 
-The primary objective of this project was to bring EWASM runtime from Ethereum community to Substrate to extend substrate ecosystem. Here we will demonstrate how to establish a substrate node that binding SSVM by EVMC.
+The primary objective of this project was to bring the Ethereum flavored WebAssembly (EWASM) runtime to Substrate. It enables developer collaboration between the Ethereum and Polkadot/Substrate ecosystems, and promotes inter-blockchain interoperability at the application level. You can now create a Substrate node (or Polkadot parachain) that supports the deployment and execution of EWASM smart contracts.
 
-Our achievement is divided into the following several parts.
+The project has a few components and dependencies.
 
-1. Provdie a [EWASM Test Guide](https://github.com/second-state/rust-ssvm/blob/master/docs/EWASM_TEST.md) show how to use official EWASM test suite verify our EWASM engine (SSVM).
-2. Create [rust-ssvm](https://github.com/second-state/rust-ssvm), it's SSVM with a rust interface through EVMC.
-3. Create a SRML [pallet-ssvm](https://github.com/second-state/pallet-ssvm) use rust-ssvm as substrate node's EWASM engine.
-4. Integrate pallet-ssvm to [substrate-ssvm-node](https://github.com/second-state/substrate-ssvm-node).
-5. Extend [command line tools](https://github.com/second-state/substrate-cli-tools) for support substrate-ssvm-node just like evm pallet did.
-6. Demonstrate how to deploy ewasm bytecode and interact with the contract.
+1. The [EWASM Test Guide](https://github.com/second-state/rust-ssvm/blob/master/docs/EWASM_TEST.md) shows how to use the official EWASM test suite to verify the SSVM EWASM engine.
+2. The [rust-ssvm](https://github.com/second-state/rust-ssvm) project provides a Rust EVMC interface for SSVM.
+3. The [pallet-ssvm](https://github.com/second-state/pallet-ssvm) project creates a "pallet" (or substrate package) that uses rust-ssvm as the substrate node's EWASM engine.
+4. The [substrate-ssvm-node](https://github.com/second-state/substrate-ssvm-node) project (this project) provides a full substrate node that incorporates the pallet-ssvm.
+5. The [command line tools](https://github.com/second-state/substrate-cli-tools) is an extension to the substrate CLI to support substrate-ssvm-node. It is the same approach as evm pallet.
 
 ## Getting Started
 
