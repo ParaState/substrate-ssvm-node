@@ -1,4 +1,4 @@
-# Substrate SSVM Node
+# Substrate SSVM Node ![build](https://github.com/second-state/substrate-ssvm-node/workflows/build/badge.svg)
 
 The primary objective of this project was to bring the Ethereum flavored WebAssembly (EWASM) runtime to Substrate. It enables developer collaboration between the Ethereum and Polkadot/Substrate ecosystems, and promotes inter-blockchain interoperability at the application level. You can now create a Substrate node (or Polkadot parachain) that supports the deployment and execution of EWASM smart contracts.
 
