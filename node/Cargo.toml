@@ -22,8 +22,7 @@ structopt = '0.3.8'
 
 [dependencies.ssvm]
 package = 'pallet-ssvm'
-git = 'https://github.com/second-state/pallet-ssvm'
-tag = 'v0.0.1'
+version = '0.1.0-rc1'
 
 [dependencies.grandpa]
 package = 'sc-finality-grandpa'
