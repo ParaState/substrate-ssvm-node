@@ -11,7 +11,7 @@ include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 pub use balances::Call as BalancesCall;
 pub use frame_support::{
     construct_runtime, parameter_types, traits::Randomness, weights::{
-        Weight, IdentityFee,
+        Weight, IdentityFee, constants::RocksDbWeight,
     }, StorageValue,
 };
 use grandpa::fg_primitives;
@@ -22,7 +22,7 @@ use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::{Hasher, OpaqueMetadata};
 use sp_runtime::traits::{
-    BlakeTwo256, Block as BlockT, IdentifyAccount, IdentityLookup, Verify,
+    BlakeTwo256, Block as BlockT, IdentifyAccount, IdentityLookup, Saturating, Verify,
 };
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -134,12 +134,17 @@ pub fn native_version() -> NativeVersion {
 parameter_types! {
     pub const BlockHashCount: BlockNumber = 250;
     pub const MaximumBlockWeight: Weight = 1_000_000_000;
+    pub const BlockExecutionWeight: Weight = 5_000_000_000;
+    pub const ExtrinsicBaseWeight: Weight = 10_000_000;
     pub const AvailableBlockRatio: Perbill = Perbill::from_percent(75);
+    pub MaximumExtrinsicWeight: Weight = AvailableBlockRatio::get()
+        .saturating_sub(Perbill::from_percent(10)) * MaximumBlockWeight::get();
     pub const MaximumBlockLength: u32 = 5 * 1024 * 1024;
     pub const Version: RuntimeVersion = VERSION;
 }
 
 impl system::Trait for Runtime {
+    type BaseCallFilter = ();
     /// The identifier used to distinguish between accounts.
     type AccountId = AccountId;
     /// The aggregated dispatch type that is available for extrinsics.
@@ -164,6 +169,18 @@ impl system::Trait for Runtime {
     type BlockHashCount = BlockHashCount;
     /// Maximum weight of each block.
     type MaximumBlockWeight = MaximumBlockWeight;
+    /// The weight of database operations that the runtime can invoke.
+    type DbWeight = RocksDbWeight;
+    /// The weight of the overhead invoked on the block import process, independent of the
+    /// extrinsics included in that block.
+    type BlockExecutionWeight = BlockExecutionWeight;
+    /// The base weight of any extrinsic processed by the runtime, independent of the
+    /// logic of that extrinsic. (Signature verification, nonce increment, fee, etc...)
+    type ExtrinsicBaseWeight = ExtrinsicBaseWeight;
+    /// The maximum weight that a single extrinsic of `Normal` dispatch class can have,
+    /// idependent of the logic of that extrinsics. (Roughly max block weight - average on
+    /// initialize cost).
+    type MaximumExtrinsicWeight = MaximumExtrinsicWeight;
     /// Maximum size of all encoded transactions (in bytes) that are allowed in one block.
     type MaximumBlockLength = MaximumBlockLength;
     /// Portion of the block weight that is available to all normal transactions.
