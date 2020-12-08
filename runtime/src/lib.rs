@@ -10,7 +10,9 @@ include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
 pub use balances::Call as BalancesCall;
 pub use frame_support::{
-    construct_runtime, parameter_types, traits::Randomness, weights::Weight, StorageValue,
+    construct_runtime, parameter_types, traits::Randomness, weights::{
+        Weight, IdentityFee,
+    }, StorageValue,
 };
 use grandpa::fg_primitives;
 use grandpa::AuthorityList as GrandpaAuthorityList;
@@ -20,7 +22,7 @@ use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::{Hasher, OpaqueMetadata};
 use sp_runtime::traits::{
-    BlakeTwo256, Block as BlockT, ConvertInto, IdentifyAccount, IdentityLookup, Verify,
+    BlakeTwo256, Block as BlockT, IdentifyAccount, IdentityLookup, Verify,
 };
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -218,7 +220,7 @@ impl transaction_payment::Trait for Runtime {
     type Currency = balances::Module<Runtime>;
     type OnTransactionPayment = ();
     type TransactionByteFee = TransactionByteFee;
-    type WeightToFee = ConvertInto;
+    type WeightToFee = IdentityFee<Balance>;
     type FeeMultiplierUpdate = ();
 }
 
