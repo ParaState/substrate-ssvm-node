@@ -10,19 +10,24 @@ include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
 pub use balances::Call as BalancesCall;
 pub use frame_support::{
-    construct_runtime, parameter_types, traits::Randomness, weights::{
+    construct_runtime, parameter_types, StorageValue,
+    traits::{
+        KeyOwnerProofSystem, Randomness,
+    },
+    weights::{
         Weight, IdentityFee, constants::RocksDbWeight,
-    }, StorageValue,
+    },
 };
 use grandpa::fg_primitives;
-use grandpa::AuthorityList as GrandpaAuthorityList;
+use grandpa::{AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList};
 use hash256_std_hasher::Hash256StdHasher;
 use sha3::{Digest, Keccak256};
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_core::{Hasher, OpaqueMetadata};
+use sp_core::{crypto::KeyTypeId, Hasher, OpaqueMetadata};
 use sp_runtime::traits::{
-    BlakeTwo256, Block as BlockT, IdentifyAccount, IdentityLookup, Saturating, Verify,
+    BlakeTwo256, Block as BlockT, IdentifyAccount, IdentityLookup, NumberFor,
+    Saturating, Verify,
 };
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -206,6 +211,19 @@ impl aura::Trait for Runtime {
 
 impl grandpa::Trait for Runtime {
     type Event = Event;
+    type Call = Call;
+
+    type KeyOwnerProofSystem = ();
+
+    type KeyOwnerProof =
+        <Self::KeyOwnerProofSystem as KeyOwnerProofSystem<(KeyTypeId, GrandpaId)>>::Proof;
+
+    type KeyOwnerIdentification = <Self::KeyOwnerProofSystem as KeyOwnerProofSystem<(
+        KeyTypeId,
+        GrandpaId,
+    )>>::IdentificationTuple;
+
+    type HandleEquivocation = ();
     type WeightInfo = ();
 }
 
@@ -223,9 +241,11 @@ impl timestamp::Trait for Runtime {
 
 parameter_types! {
     pub const ExistentialDeposit: u128 = 500;
+    pub const MaxLocks: u32 = 50;
 }
 
 impl balances::Trait for Runtime {
+    type MaxLocks = MaxLocks;
     /// The type for recording an account's balance.
     type Balance = Balance;
     /// The ubiquitous event type.
@@ -383,7 +403,7 @@ impl_runtime_apis! {
 
         fn decode_session_keys(
             encoded: Vec<u8>,
-        ) -> Option<Vec<(Vec<u8>, sp_core::crypto::KeyTypeId)>> {
+        ) -> Option<Vec<(Vec<u8>, KeyTypeId)>> {
             opaque::SessionKeys::decode_into_raw_public_keys(&encoded)
         }
     }
@@ -391,6 +411,26 @@ impl_runtime_apis! {
     impl fg_primitives::GrandpaApi<Block> for Runtime {
         fn grandpa_authorities() -> GrandpaAuthorityList {
             Grandpa::grandpa_authorities()
+        }
+
+        fn submit_report_equivocation_unsigned_extrinsic(
+            _equivocation_proof: fg_primitives::EquivocationProof<
+                <Block as BlockT>::Hash,
+                NumberFor<Block>,
+            >,
+            _key_owner_proof: fg_primitives::OpaqueKeyOwnershipProof,
+        ) -> Option<()> {
+            None
+        }
+
+        fn generate_key_ownership_proof(
+            _set_id: fg_primitives::SetId,
+            _authority_id: GrandpaId,
+        ) -> Option<fg_primitives::OpaqueKeyOwnershipProof> {
+            // NOTE: this is the only implementation possible since we've
+            // defined our key owner proof type as a bottom type (i.e. a type
+            // with no values).
+            None
         }
     }
 }
