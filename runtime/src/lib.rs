@@ -179,6 +179,7 @@ impl system::Trait for Runtime {
     type OnKilledAccount = ();
     /// The data to be stored in an account.
     type AccountData = balances::AccountData<Balance>;
+    type SystemWeightInfo = ();
 }
 
 impl aura::Trait for Runtime {
@@ -187,6 +188,7 @@ impl aura::Trait for Runtime {
 
 impl grandpa::Trait for Runtime {
     type Event = Event;
+    type WeightInfo = ();
 }
 
 parameter_types! {
@@ -198,6 +200,7 @@ impl timestamp::Trait for Runtime {
     type Moment = u64;
     type OnTimestampSet = Aura;
     type MinimumPeriod = MinimumPeriod;
+    type WeightInfo = ();
 }
 
 parameter_types! {
@@ -212,6 +215,7 @@ impl balances::Trait for Runtime {
     type DustRemoval = ();
     type ExistentialDeposit = ExistentialDeposit;
     type AccountStore = System;
+    type WeightInfo = ();
 }
 
 parameter_types! {
