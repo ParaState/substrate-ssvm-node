@@ -1,86 +1,58 @@
 [package]
-authors = ['Anonymous']
-build = 'build.rs'
-edition = '2018'
-homepage = 'https://substrate.dev'
-license = 'Unlicense'
-name = 'node-template'
-repository = 'https://github.com/paritytech/substrate/'
-version = '2.0.0'
+name = "node-template"
+version = "2.0.0"
+authors = ["Anonymous"]
+description = "A new FRAME-based Substrate node, ready for hacking."
+edition = "2018"
+license = "Unlicense"
+build = "build.rs"
+homepage = "https://substrate.dev"
+repository = "https://github.com/paritytech/substrate/"
 
-[build-dependencies]
-vergen = '3.0.4'
-
-[build-dependencies.build-script-utils]
-package = 'substrate-build-script-utils'
-version = '2.0.0'
-
-[dependencies]
-futures = '0.3.1'
-log = '0.4.8'
-structopt = '0.3.8'
-
-[dependencies.ssvm]
-package = 'pallet-ssvm'
-git = "https://github.com/second-state/pallet-ssvm"
-tag = 'v0.1.0-rc1-crates'
-
-[dependencies.grandpa]
-package = 'sc-finality-grandpa'
-version = '0.8.0'
-
-[dependencies.grandpa-primitives]
-package = 'sp-finality-grandpa'
-version = '2.0.0'
-
-[dependencies.node-template-runtime]
-path = '../runtime'
-version = '2.0.0'
-
-[dependencies.sc-basic-authorship]
-version = '0.8.0'
-
-[dependencies.sc-cli]
-version = '0.8.0'
-
-[dependencies.sc-client-api]
-version = '2.0.0'
-
-[dependencies.sc-consensus]
-version = '0.8.0'
-
-[dependencies.sc-consensus-aura]
-version = '0.8.0'
-
-[dependencies.sc-executor]
-version = '0.8.0'
-
-[dependencies.sc-network]
-version = '0.8.0'
-
-[dependencies.sc-service]
-version = '0.8.0'
-
-[dependencies.sc-transaction-pool]
-version = '2.0.0'
-
-[dependencies.sp-consensus]
-version = '0.8.0'
-
-[dependencies.sp-consensus-aura]
-version = '0.8.0'
-
-[dependencies.sp-core]
-version = '2.0.0'
-
-[dependencies.sp-inherents]
-version = '2.0.0'
-
-[dependencies.sp-runtime]
-version = '2.0.0'
-
-[dependencies.sp-transaction-pool]
-version = '2.0.0'
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [[bin]]
-name = 'node-template'
+name = "node-template"
+
+[dependencies]
+futures = "0.3.1"
+log = "0.4.8"
+structopt = "0.3.8"
+
+pallet-ssvm = { git = "https://github.com/second-state/pallet-ssvm", tag = "v0.1.0-rc1-crates" }
+
+sc-cli = { version = "0.8.0", features = ["wasmtime"] }
+sp-core = { version = "2.0.0" }
+sc-executor = { version = "0.8.0", features = ["wasmtime"] }
+sc-service = { version = "0.8.0", features = ["wasmtime"] }
+sc-network = { version = "0.8.0" }
+sp-inherents = { version = "2.0.0" }
+sc-transaction-pool = { version = "2.0.0" }
+sp-transaction-pool = { version = "2.0.0" }
+sc-consensus-aura = { version = "0.8.0" }
+sp-consensus-aura = { version = "0.8.0" }
+sp-consensus = { version = "0.8.0" }
+sc-consensus = { version = "0.8.0" }
+sc-finality-grandpa = { version = "0.8.0" }
+sp-finality-grandpa = { version = "2.0.0" }
+sc-client-api = { version = "2.0.0" }
+sp-runtime = { version = "2.0.0" }
+
+# These dependencies are used for the node template's RPCs
+jsonrpc-core = "15.0.0"
+sc-rpc = { version = "2.0.0" }
+sp-api = { version = "2.0.0" }
+sc-rpc-api = { version = "0.8.0" }
+sp-blockchain = { version = "2.0.0" }
+sp-block-builder = { version = "2.0.0" }
+sc-basic-authorship = { version = "0.8.0" }
+substrate-frame-rpc-system = { version = "2.0.0" }
+pallet-transaction-payment-rpc = { version = "2.0.0" }
+
+node-template-runtime = { version = "2.0.0", path = "../runtime" }
+[build-dependencies]
+substrate-build-script-utils = { version = "2.0.0" }
+
+[features]
+default = []
