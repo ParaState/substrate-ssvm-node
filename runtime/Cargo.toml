@@ -10,20 +10,6 @@ version = '2.0.1'
 [package.metadata.docs.rs]
 targets = ['x86_64-unknown-linux-gnu']
 
-[dependencies.ssvm]
-default-features = false
-package = 'pallet-ssvm'
-git = 'https://github.com/second-state/pallet-ssvm'
-tag = 'v0.0.1'
-
-[dependencies.sha3]
-default-features = false
-version = '0.8'
-
-[dependencies.hash256-std-hasher]
-default-features = false
-version = '0.15.2'
-
 [build-dependencies]
 substrate-wasm-builder = '3.0.0'
 
@@ -37,9 +23,6 @@ version = '1.3.4'
 [dependencies]
 hex-literal = { optional = true, version = '0.3.1' }
 serde = { features = ['derive'], optional = true, version = '1.0.119' }
-
-# local dependencies
-pallet-template = { path = '../pallets/template', default-features = false, version = '2.0.1' }
 
 # Substrate dependencies
 frame-benchmarking = { default-features = false, optional = true, version = '2.0.1' }
@@ -68,6 +51,11 @@ sp-std = { default-features = false, version = '2.0.1' }
 sp-transaction-pool = { default-features = false, version = '2.0.1' }
 sp-version = { default-features = false, version = '2.0.1' }
 
+# SSVM
+pallet-ssvm = { default-features = false, version = "0.1.0-rc2" }
+sha3 = { default-features = false, version = "0.8" }
+hash256-std-hasher = { default-features = false, version = '0.15.2' }
+
 [features]
 default = ['std']
 runtime-benchmarks = [
@@ -92,7 +80,6 @@ std = [
     'pallet-grandpa/std',
     'pallet-randomness-collective-flip/std',
     'pallet-sudo/std',
-    'pallet-template/std',
     'pallet-timestamp/std',
     'pallet-transaction-payment/std',
     'pallet-transaction-payment-rpc-runtime-api/std',
@@ -107,7 +94,5 @@ std = [
     'sp-std/std',
     'sp-transaction-pool/std',
     'sp-version/std',
-    'ssvm/std',
-    'hash256-std-hasher/std',
-    'sha3/std',
+    'pallet-ssvm/std',
 ]

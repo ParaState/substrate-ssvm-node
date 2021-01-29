@@ -7,7 +7,7 @@ use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_finality_grandpa::AuthorityId as GrandpaId;
 use sp_runtime::traits::{Verify, IdentifyAccount};
 use sc_service::ChainType;
-use ssvm::{ConvertAccountId, HashTruncateConvertAccountId};
+use pallet_ssvm::{ConvertAccountId, HashTruncateConvertAccountId};
 
 // The URL for the telemetry server.
 // const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
@@ -154,7 +154,7 @@ fn testnet_genesis(
 			// Assign network admin rights.
 			key: root_key,
 		}),
-		ssvm: Some(SSVMConfig {
+		pallet_ssvm: Some(SSVMConfig {
 			accounts: vec![(
 				HashTruncateConvertAccountId::<Sha3Hasher>::convert_account_id(
 					&get_account_id_from_seed::<sr25519::Public>("Alice"),

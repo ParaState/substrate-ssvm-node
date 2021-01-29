@@ -40,8 +40,8 @@ pub use frame_support::{
 	},
 };
 
-pub use ssvm::Account as SSVMAccount;
-use ssvm::HashTruncateConvertAccountId;
+pub use pallet_ssvm::Account as SSVMAccount;
+use pallet_ssvm::HashTruncateConvertAccountId;
 
 /// An index to a block.
 pub type BlockNumber = u32;
@@ -274,7 +274,7 @@ impl pallet_sudo::Trait for Runtime {
 	type Call = Call;
 }
 
-impl ssvm::Trait for Runtime {
+impl pallet_ssvm::Trait for Runtime {
 	type ConvertAccountId = HashTruncateConvertAccountId<Sha3Hasher>;
 	type Currency = Balances;
 	type Event = Event;
@@ -296,7 +296,7 @@ construct_runtime!(
 		TransactionPayment: pallet_transaction_payment::{Module, Storage},
 		Sudo: pallet_sudo::{Module, Call, Config<T>, Storage, Event<T>},
 		// Include the custom logic from the template pallet in the runtime.
-		SSVM: ssvm::{Module, Config, Call, Storage, Event},
+		SSVM: pallet_ssvm::{Module, Config, Call, Storage, Event},
 	}
 );
 

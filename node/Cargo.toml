@@ -52,10 +52,8 @@ sp-runtime = '2.0.1'
 sp-transaction-pool = '2.0.1'
 substrate-frame-rpc-system = '2.0.1'
 
-[dependencies.ssvm]
-package = 'pallet-ssvm'
-git = 'https://github.com/second-state/pallet-ssvm'
-tag = 'v0.0.1'
+# SSVM
+pallet-ssvm = { default-features = false, version = "0.1.0-rc2" }
 
 [features]
 default = []
