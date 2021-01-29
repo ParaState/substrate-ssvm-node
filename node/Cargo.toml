@@ -1,86 +1,62 @@
 [package]
-authors = ['Anonymous']
+authors = ['Substrate DevHub <https://github.com/substrate-developer-hub>']
 build = 'build.rs'
+description = 'A fresh FRAME-based Substrate node, ready for hacking.'
 edition = '2018'
 homepage = 'https://substrate.dev'
 license = 'Unlicense'
 name = 'node-template'
-repository = 'https://github.com/paritytech/substrate/'
-version = '2.0.0-alpha.5'
+repository = 'https://github.com/substrate-developer-hub/substrate-node-template/'
+version = '2.0.1'
+
+[[bin]]
+name = 'node-template'
+
+[package.metadata.docs.rs]
+targets = ['x86_64-unknown-linux-gnu']
 
 [build-dependencies]
-vergen = '3.0.4'
-
-[build-dependencies.build-script-utils]
-package = 'substrate-build-script-utils'
-version = '2.0.0-alpha.5'
+substrate-build-script-utils = '2.0.1'
 
 [dependencies]
-futures = '0.3.1'
-log = '0.4.8'
+jsonrpc-core = '15.0.0'
 structopt = '0.3.8'
+
+# local dependencies
+node-template-runtime = { path = '../runtime', version = '2.0.1' }
+
+# Substrate dependencies
+frame-benchmarking = '2.0.1'
+frame-benchmarking-cli = '2.0.1'
+pallet-transaction-payment-rpc = '2.0.1'
+sc-basic-authorship = '0.8.1'
+sc-cli = { features = ['wasmtime'], version = '0.8.1' }
+sc-client-api = '2.0.1'
+sc-consensus = '0.8.1'
+sc-consensus-aura = '0.8.1'
+sc-executor = { features = ['wasmtime'], version = '0.8.1' }
+sc-finality-grandpa = '0.8.1'
+sc-rpc = '2.0.1'
+sc-rpc-api = '0.8.1'
+sc-service = { features = ['wasmtime'], version = '0.8.1' }
+sc-transaction-pool = '2.0.1'
+sp-api = '2.0.1'
+sp-block-builder = '2.0.1'
+sp-blockchain = '2.0.1'
+sp-consensus = '0.8.1'
+sp-consensus-aura = '0.8.1'
+sp-core = '2.0.1'
+sp-finality-grandpa = '2.0.1'
+sp-inherents = '2.0.1'
+sp-runtime = '2.0.1'
+sp-transaction-pool = '2.0.1'
+substrate-frame-rpc-system = '2.0.1'
 
 [dependencies.ssvm]
 package = 'pallet-ssvm'
 git = 'https://github.com/second-state/pallet-ssvm'
 tag = 'v0.0.1'
 
-[dependencies.grandpa]
-package = 'sc-finality-grandpa'
-version = '0.8.0-alpha.5'
-
-[dependencies.grandpa-primitives]
-package = 'sp-finality-grandpa'
-version = '2.0.0-alpha.5'
-
-[dependencies.node-template-runtime]
-path = '../runtime'
-version = '2.0.0-alpha.5'
-
-[dependencies.sc-basic-authorship]
-version = '0.8.0-alpha.5'
-
-[dependencies.sc-cli]
-version = '0.8.0-alpha.5'
-
-[dependencies.sc-client]
-version = '0.8.0-alpha.5'
-
-[dependencies.sc-client-api]
-version = '2.0.0-alpha.5'
-
-[dependencies.sc-consensus-aura]
-version = '0.8.0-alpha.5'
-
-[dependencies.sc-executor]
-version = '0.8.0-alpha.5'
-
-[dependencies.sc-network]
-version = '0.8.0-alpha.5'
-
-[dependencies.sc-service]
-version = '0.8.0-alpha.5'
-
-[dependencies.sc-transaction-pool]
-version = '2.0.0-alpha.5'
-
-[dependencies.sp-consensus]
-version = '0.8.0-alpha.5'
-
-[dependencies.sp-consensus-aura]
-version = '0.8.0-alpha.5'
-
-[dependencies.sp-core]
-version = '2.0.0-alpha.5'
-
-[dependencies.sp-inherents]
-version = '2.0.0-alpha.5'
-
-[dependencies.sp-runtime]
-version = '2.0.0-alpha.5'
-
-[dependencies.sp-transaction-pool]
-version = '2.0.0-alpha.5'
-
-[[bin]]
-name = 'node-template'
+[features]
+default = []
+runtime-benchmarks = ['node-template-runtime/runtime-benchmarks']
