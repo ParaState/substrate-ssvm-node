@@ -1,16 +1,15 @@
 [package]
-authors = ['Substrate DevHub <https://github.com/substrate-developer-hub>']
+authors = ['Second State <https://github.com/second-state>']
 build = 'build.rs'
 description = 'A fresh FRAME-based Substrate node, ready for hacking.'
 edition = '2018'
-homepage = 'https://substrate.dev'
 license = 'Unlicense'
-name = 'node-template'
-repository = 'https://github.com/substrate-developer-hub/substrate-node-template/'
+name = 'ssvm-node'
+repository = 'https://github.com/second-state/substrate-ssvm-node/'
 version = '2.0.1'
 
 [[bin]]
-name = 'node-template'
+name = 'ssvm-node'
 
 [package.metadata.docs.rs]
 targets = ['x86_64-unknown-linux-gnu']
@@ -23,7 +22,7 @@ jsonrpc-core = '15.0.0'
 structopt = '0.3.8'
 
 # local dependencies
-node-template-runtime = { path = '../runtime', version = '2.0.1' }
+ssvm-node-runtime = { path = '../runtime', version = '2.0.1' }
 
 # Substrate dependencies
 frame-benchmarking = '2.0.1'
@@ -57,4 +56,4 @@ pallet-ssvm = { default-features = false, version = "0.1.0-rc2" }
 
 [features]
 default = []
-runtime-benchmarks = ['node-template-runtime/runtime-benchmarks']
+runtime-benchmarks = ['ssvm-node-runtime/runtime-benchmarks']

@@ -1,5 +1,5 @@
 use sp_core::{Pair, Public, sr25519};
-use node_template_runtime::{
+use ssvm_node_runtime::{
     AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig, SSVMAccount, SSVMConfig,
     Sha3Hasher, Signature, SudoConfig, SystemConfig, WASM_BINARY,
 };

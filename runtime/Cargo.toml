@@ -1,10 +1,10 @@
 [package]
-authors = ['Substrate DevHub <https://github.com/substrate-developer-hub>']
+authors = ['Second State <https://github.com/second-state>']
 edition = '2018'
 homepage = 'https://substrate.dev'
 license = 'Unlicense'
-name = 'node-template-runtime'
-repository = 'https://github.com/substrate-developer-hub/substrate-node-template/'
+name = 'ssvm-node-runtime'
+repository = 'https://github.com/second-state/substrate-ssvm-node/'
 version = '2.0.1'
 
 [package.metadata.docs.rs]
