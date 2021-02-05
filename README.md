@@ -12,7 +12,15 @@ The project has a few components and dependencies.
 
 ## Getting Started
 
-Use [secondstate/substrate-ssvm](https://hub.docker.com/r/secondstate/substrate-ssvm) as building & running environment:
+### Environment (Docker)
+
+We provide a docker image [secondstate/substrate-ssvm](https://hub.docker.com/r/secondstate/substrate-ssvm) for building and running the Substrate SSVM Node.
+
+```bash
+> docker pull secondstate/substrate-ssvm
+```
+
+### Build and Run Substrate SSVM Node
 
 ```bash
 > git clone https://github.com/second-state/substrate-ssvm-node.git
@@ -28,7 +36,10 @@ Use [secondstate/substrate-ssvm](https://hub.docker.com/r/secondstate/substrate-
 (docker) cargo run --release --bin ssvm-node -- --dev --ws-external
 ```
 
-See our documents for more information about interacting with node:
-  - Use Substrate web interface
-    - [Demo video](https://drive.google.com/open?id=1Xs-EuwCyYG6SKwD8K6UUOoX-CTrA0ui9)
-    - [Doc](./docs/interact-using-web.md)
+### Interact with Substrate SSVM Node
+
+You can use the [Substrate Web Interface(Polkadot.js)](https://polkadot.js.org/apps) to connect with the node.
+
+We provide a [demo video](https://drive.google.com/open?id=1sR41n8fdLJD66Skcq8f7hyLRRQzSX9KF) to show that how polkadot.js interacts with our nodes.
+
+And the detailed steps can be found in this [tutorial](./docs/interact-using-web.md).
