@@ -52,7 +52,7 @@ sp-transaction-pool = { default-features = false, version = '3.0.0' }
 sp-version = { default-features = false, version = '3.0.0' }
 
 # SSVM
-pallet-ssvm = { default-features = false, version = "0.1.0-rc2" }
+pallet-ssvm = { default-features = false, version = "0.2.0-rc1" }
 sha3 = { default-features = false, version = "0.8" }
 hash256-std-hasher = { default-features = false, version = '0.15.2' }
 
