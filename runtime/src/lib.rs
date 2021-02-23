@@ -39,6 +39,10 @@ pub use frame_support::{
 		constants::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight, WEIGHT_PER_SECOND},
 	},
 };
+use pallet_evm::{
+	Account as EVMAccount, FeeCalculator, HashedAddressMapping,
+	EnsureAddressTruncated, Runner,
+};
 use pallet_transaction_payment::CurrencyAdapter;
 
 pub use pallet_ssvm::Account as SSVMAccount;
@@ -283,6 +287,59 @@ impl pallet_ssvm::Config for Runtime {
 	type Event = Event;
 }
 
+/// Fixed gas price of `1`.
+pub struct FixedGasPrice;
+
+impl FeeCalculator for FixedGasPrice {
+	fn min_gas_price() -> U256 {
+		// Gas price is always one token per gas.
+		1.into()
+	}
+}
+
+impl pallet_evm::Config for Runtime {
+	type FeeCalculator = FixedGasPrice;
+	type GasWeightMapping = ();
+	type CallOrigin = EnsureAddressTruncated;
+	type WithdrawOrigin = EnsureAddressTruncated;
+	type AddressMapping = HashedAddressMapping<BlakeTwo256>;
+	type Currency = Balances;
+	type Event = Event;
+	type Runner = pallet_evm::runner::stack::Runner<Self>;
+	type Precompiles = (
+		pallet_evm_precompile_simple::ECRecover,
+		pallet_evm_precompile_simple::Sha256,
+		pallet_evm_precompile_simple::Ripemd160,
+		pallet_evm_precompile_simple::Identity,
+	);
+	type ChainId = ChainId;
+}
+
+pub struct EthereumFindAuthor<F>(PhantomData<F>);
+impl<F: FindAuthor<u32>> FindAuthor<H160> for EthereumFindAuthor<F>
+{
+	fn find_author<'a, I>(digests: I) -> Option<H160> where
+		I: 'a + IntoIterator<Item=(ConsensusEngineId, &'a [u8])>
+	{
+		if let Some(author_index) = F::find_author(digests) {
+			let authority_id = Aura::authorities()[author_index as usize].clone();
+			return Some(H160::from_slice(&authority_id.to_raw_vec()[4..24]));
+		}
+		None
+	}
+}
+
+parameter_types! {
+	pub BlockGasLimit: U256 = U256::from(u32::max_value());
+}
+
+impl pallet_ethereum::Config for Runtime {
+	type Event = Event;
+	type FindAuthor = EthereumFindAuthor<Aura>;
+	type StateRoot = pallet_ethereum::IntermediateStateRoot;
+	type BlockGasLimit = BlockGasLimit;
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime where
@@ -300,6 +357,8 @@ construct_runtime!(
 		Sudo: pallet_sudo::{Module, Call, Config<T>, Storage, Event<T>},
 		// Include the custom logic from the template pallet in the runtime.
 		SSVM: pallet_ssvm::{Module, Config, Call, Storage, Event},
+		Ethereum: pallet_ethereum::{Module, Call, Storage, Event, Config, ValidateUnsigned},
+		EVM: pallet_evm::{Module, Config, Call, Storage, Event<T>},
 	}
 );
 

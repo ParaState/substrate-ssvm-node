@@ -55,5 +55,11 @@ substrate-frame-rpc-system = '3.0.0'
 # SSVM
 pallet-ssvm = { default-features = false, version = "0.2.0-rc1" }
 
+# EVM
+pallet-evm = { path = "../frame/evm" }
+pallet-ethereum = { path = "../frame/ethereum" }
+fc-consensus = { path = "../client/consensus" }
+fp-consensus = { path = "../primitives/consensus" }
+
 [features]
 default = []

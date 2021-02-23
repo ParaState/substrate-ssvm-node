@@ -3,6 +3,17 @@ panic = 'unwind'
 
 [workspace]
 members = [
+    "frame/dynamic-fee",
+    "frame/ethereum",
+    "frame/evm",
+    "frame/evm/precompile/simple",
+    "frame/evm/precompile/modexp",
+    "frame/evm/precompile/ed25519",
+    "frame/evm/precompile/bn128",
+    "frame/evm/precompile/blake2",
+    "frame/evm/precompile/dispatch",
+    "primitives/consensus",
+    "primitives/evm",
     'node',
     # 'pallets/*',
     'runtime',

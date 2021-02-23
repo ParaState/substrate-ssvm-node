@@ -1,0 +1,5171 @@
+diff --git a/client/consensus/Cargo.toml b/client/consensus/Cargo.toml
+new file mode 100644
+index 0000000..f7f7363
+--- /dev/null
++++ b/client/consensus/Cargo.toml
+@@ -0,0 +1,26 @@
++[package]
++name = "fc-consensus"
++version = "0.1.0"
++authors = ["Parity Technologies <admin@parity.io>"]
++description = "Frontier consensus for substrate"
++edition = "2018"
++license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
++repository = "https://github.com/paritytech/frontier/"
++
++[dependencies]
++codec = { package = "parity-scale-codec", version = "1.3.4", features = ["derive"] }
++sp-core = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-blockchain = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-runtime = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-api = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sc-client-api = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-block-builder = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-inherents = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++fp-consensus = { version = "0.1.0", path = "../../primitives/consensus" }
++fp-rpc = { path = "../../primitives/rpc" }
++sp-consensus = { version = "0.8.0", git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++log = "0.4.8"
++futures = { version = "0.3.1", features = ["compat"] }
++sp-timestamp = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++derive_more = "0.99.2"
++prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate.git", version = '3.0.0'}
+diff --git a/client/consensus/src/aux_schema.rs b/client/consensus/src/aux_schema.rs
+new file mode 100644
+index 0000000..5781a41
+--- /dev/null
++++ b/client/consensus/src/aux_schema.rs
+@@ -0,0 +1,108 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use codec::{Encode, Decode};
++use sp_core::H256;
++use sp_runtime::traits::Block as BlockT;
++use sc_client_api::backend::AuxStore;
++use sp_blockchain::{Result as ClientResult, Error as ClientError};
++
++fn load_decode<B: AuxStore, T: Decode>(backend: &B, key: &[u8]) -> ClientResult<Option<T>> {
++	let corrupt = |e: codec::Error| {
++		ClientError::Backend(format!("Frontier DB is corrupted. Decode error: {}", e.what()))
++	};
++	match backend.get_aux(key)? {
++		None => Ok(None),
++		Some(t) => T::decode(&mut &t[..]).map(Some).map_err(corrupt)
++	}
++}
++
++/// Map an Ethereum block hash into a Substrate block hash.
++pub fn block_hash_key(ethereum_block_hash: H256) -> Vec<u8> {
++	let mut ret = b"ethereum_block_hash:".to_vec();
++	ret.append(&mut ethereum_block_hash.as_ref().to_vec());
++	ret
++}
++
++/// Given an Ethereum block hash, get the corresponding Substrate block hash from AuxStore.
++pub fn load_block_hash<Block: BlockT, B: AuxStore>(
++	backend: &B,
++	hash: H256,
++) -> ClientResult<Option<Vec<Block::Hash>>> {
++	let key = block_hash_key(hash);
++	load_decode(backend, &key)
++}
++
++/// Update Aux block hash.
++pub fn write_block_hash<Hash: Encode + Decode, F, R, Backend: AuxStore>(
++	client: &Backend,
++	ethereum_hash: H256,
++	block_hash: Hash,
++	write_aux: F,
++) -> ClientResult<R> where
++	F: FnOnce(&[(&[u8], &[u8])]) -> R,
++{
++	let key = block_hash_key(ethereum_hash);
++
++	let mut data: Vec<Hash> = match load_decode(client, &key) {
++		Ok(Some(hashes)) => hashes,
++		Ok(None) => Vec::new(),
++		Err(e) => return Err(e)
++
++	};
++	data.push(block_hash);
++
++	Ok(write_aux(&[(&key, &data.encode()[..])]))
++}
++
++/// Map an Ethereum transaction hash into its corresponding Ethereum block hash and index.
++pub fn transaction_metadata_key(ethereum_transaction_hash: H256) -> Vec<u8> {
++	let mut ret = b"ethereum_transaction_hash:".to_vec();
++	ret.append(&mut ethereum_transaction_hash.as_ref().to_vec());
++	ret
++}
++
++/// Given an Ethereum transaction hash, get the corresponding Ethereum block hash and index.
++pub fn load_transaction_metadata<B: AuxStore>(
++	backend: &B,
++	hash: H256,
++) -> ClientResult<Option<Vec<(H256, u32)>>> {
++	let key = transaction_metadata_key(hash);
++	load_decode(backend, &key)
++}
++
++/// Update Aux transaction metadata.
++pub fn write_transaction_metadata<F, R, Backend: AuxStore>(
++	client: &Backend,
++	hash: H256,
++	metadata: (H256, u32),
++	write_aux: F,
++) -> ClientResult<R> where
++	F: FnOnce(&[(&[u8], &[u8])]) -> R,
++{
++	let key = transaction_metadata_key(hash);
++
++	let mut data: Vec<(H256, u32)> = match load_decode(client, &key) {
++		Ok(Some(metadata)) => metadata,
++		Ok(None) => Vec::new(),
++		Err(e) => return Err(e)
++	};
++	data.push(metadata);
++
++	Ok(write_aux(&[(&key, &data.encode()[..])]))
++}
+diff --git a/client/consensus/src/lib.rs b/client/consensus/src/lib.rs
+new file mode 100644
+index 0000000..d1c27ff
+--- /dev/null
++++ b/client/consensus/src/lib.rs
+@@ -0,0 +1,195 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++mod aux_schema;
++
++pub use crate::aux_schema::{load_block_hash, load_transaction_metadata};
++
++use std::sync::Arc;
++use std::collections::HashMap;
++use std::marker::PhantomData;
++use fp_consensus::{FRONTIER_ENGINE_ID, ConsensusLog};
++use fp_rpc::EthereumRuntimeRPCApi;
++use sc_client_api::{BlockOf, backend::AuxStore};
++use sp_blockchain::{HeaderBackend, ProvideCache, well_known_cache_keys::Id as CacheKeyId};
++use sp_block_builder::BlockBuilder as BlockBuilderApi;
++use sp_runtime::generic::OpaqueDigestItemId;
++use sp_runtime::traits::{Block as BlockT, Header as HeaderT, One, Zero};
++use sp_api::{ProvideRuntimeApi, BlockId};
++use sp_consensus::{
++	BlockImportParams, Error as ConsensusError, BlockImport,
++	BlockCheckParams, ImportResult,
++};
++use log::*;
++use sc_client_api;
++
++#[derive(derive_more::Display, Debug)]
++pub enum Error {
++	#[display(fmt = "Multiple post-runtime Ethereum blocks, rejecting!")]
++	MultiplePostRuntimeLogs,
++	#[display(fmt = "Post-runtime Ethereum block not found, rejecting!")]
++	NoPostRuntimeLog,
++	#[display(fmt = "Cannot access the runtime at genesis, rejecting!")]
++	RuntimeApiCallFailed,
++}
++
++impl From<Error> for String {
++	fn from(error: Error) -> String {
++		error.to_string()
++	}
++}
++
++impl std::convert::From<Error> for ConsensusError {
++	fn from(error: Error) -> ConsensusError {
++		ConsensusError::ClientImport(error.to_string())
++	}
++}
++
++pub struct FrontierBlockImport<B: BlockT, I, C> {
++	inner: I,
++	client: Arc<C>,
++	enabled: bool,
++	_marker: PhantomData<B>,
++}
++
++impl<Block: BlockT, I: Clone + BlockImport<Block>, C> Clone for FrontierBlockImport<Block, I, C> {
++	fn clone(&self) -> Self {
++		FrontierBlockImport {
++			inner: self.inner.clone(),
++			client: self.client.clone(),
++			enabled: self.enabled,
++			_marker: PhantomData,
++		}
++	}
++}
++
++impl<B, I, C> FrontierBlockImport<B, I, C> where
++	B: BlockT,
++	I: BlockImport<B, Transaction = sp_api::TransactionFor<C, B>> + Send + Sync,
++	I::Error: Into<ConsensusError>,
++	C: ProvideRuntimeApi<B> + Send + Sync + HeaderBackend<B> + AuxStore + ProvideCache<B> + BlockOf,
++	C::Api: EthereumRuntimeRPCApi<B>,
++	C::Api: BlockBuilderApi<B, Error = sp_blockchain::Error>,
++{
++	pub fn new(
++		inner: I,
++		client: Arc<C>,
++		enabled: bool,
++	) -> Self {
++		Self {
++			inner,
++			client,
++			enabled,
++			_marker: PhantomData,
++		}
++	}
++}
++
++impl<B, I, C> BlockImport<B> for FrontierBlockImport<B, I, C> where
++	B: BlockT,
++	I: BlockImport<B, Transaction = sp_api::TransactionFor<C, B>> + Send + Sync,
++	I::Error: Into<ConsensusError>,
++	C: ProvideRuntimeApi<B> + Send + Sync + HeaderBackend<B> + AuxStore + ProvideCache<B> + BlockOf,
++	C::Api: EthereumRuntimeRPCApi<B>,
++	C::Api: BlockBuilderApi<B, Error = sp_blockchain::Error>,
++{
++	type Error = ConsensusError;
++	type Transaction = sp_api::TransactionFor<C, B>;
++
++	fn check_block(
++		&mut self,
++		block: BlockCheckParams<B>,
++	) -> Result<ImportResult, Self::Error> {
++		self.inner.check_block(block).map_err(Into::into)
++	}
++
++	fn import_block(
++		&mut self,
++		mut block: BlockImportParams<B, Self::Transaction>,
++		new_cache: HashMap<CacheKeyId, Vec<u8>>,
++	) -> Result<ImportResult, Self::Error> {
++		macro_rules! insert_closure {
++			() => (
++				|insert| block.auxiliary.extend(
++					insert.iter().map(|(k, v)| (k.to_vec(), Some(v.to_vec())))
++				)
++			)
++		}
++
++		let client = self.client.clone();
++
++		if self.enabled {
++			let log = find_frontier_log::<B>(&block.header)?;
++			let hash = block.post_hash();
++			match log {
++				ConsensusLog::EndBlock {
++					block_hash, transaction_hashes,
++				} => {
++					let res = aux_schema::write_block_hash(client.as_ref(), block_hash, hash, insert_closure!());
++					if res.is_err() { trace!(target: "frontier-consensus", "{:?}", res); }
++
++					for (index, transaction_hash) in transaction_hashes.into_iter().enumerate() {
++						let res = aux_schema::write_transaction_metadata(
++							client.as_ref(),
++							transaction_hash,
++							(block_hash, index as u32),
++							insert_closure!(),
++						);
++						if res.is_err() { trace!(target: "frontier-consensus", "{:?}", res); }
++					}
++				},
++			}
++			// On importing block 1 we also map the genesis block in the auxiliary.
++			if block.header.number().clone() == One::one() {
++				let id = BlockId::Number(Zero::zero());
++				if let Ok(Some(header)) = client.header(id) {
++					let block = self.client.runtime_api().current_block(&id)
++						.map_err(|_| Error::RuntimeApiCallFailed)?;
++					let block_hash = block.unwrap().header.hash();
++					let res = aux_schema::write_block_hash(
++						client.as_ref(),
++						block_hash,
++						header.hash(),
++						insert_closure!()
++					);
++					if res.is_err() { trace!(target: "frontier-consensus", "{:?}", res); }
++				}
++			}
++		}
++
++		self.inner.import_block(block, new_cache).map_err(Into::into)
++	}
++}
++
++fn find_frontier_log<B: BlockT>(
++	header: &B::Header,
++) -> Result<ConsensusLog, Error> {
++	let mut frontier_log: Option<_> = None;
++	for log in header.digest().logs() {
++		trace!(target: "frontier-consensus", "Checking log {:?}, looking for ethereum block.", log);
++		let log = log.try_to::<ConsensusLog>(OpaqueDigestItemId::Consensus(&FRONTIER_ENGINE_ID));
++		match (log, frontier_log.is_some()) {
++			(Some(_), true) =>
++				return Err(Error::MultiplePostRuntimeLogs),
++			(Some(log), false) => frontier_log = Some(log),
++			_ => trace!(target: "frontier-consensus", "Ignoring digest not meant for us"),
++		}
++	}
++
++	Ok(frontier_log.ok_or(Error::NoPostRuntimeLog)?)
++}
+diff --git a/client/rpc-core/Cargo.toml b/client/rpc-core/Cargo.toml
+new file mode 100644
+index 0000000..6dbd663
+--- /dev/null
++++ b/client/rpc-core/Cargo.toml
+@@ -0,0 +1,17 @@
++[package]
++name = "fc-rpc-core"
++version = "0.1.0"
++authors = ["Parity Technologies <admin@parity.io>"]
++edition = "2018"
++description = "RPC traits of Ethereum."
++license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
++
++[dependencies]
++jsonrpc-core = "15.0.0"
++jsonrpc-core-client = "14.0.3"
++jsonrpc-derive = "14.0.3"
++jsonrpc-pubsub = "15.0.0"
++rustc-hex = "2.1.0"
++ethereum-types = "0.10.0"
++serde = { version = "1.0", features = ["derive"] }
++serde_json = "1.0"
+diff --git a/client/rpc-core/src/eth.rs b/client/rpc-core/src/eth.rs
+new file mode 100644
+index 0000000..447a53b
+--- /dev/null
++++ b/client/rpc-core/src/eth.rs
+@@ -0,0 +1,209 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! Eth rpc interface.
++
++use ethereum_types::{H160, H256, H64, U256, U64};
++use jsonrpc_core::{BoxFuture, Result};
++use jsonrpc_derive::rpc;
++
++use crate::types::{
++	BlockNumber, Bytes, CallRequest, Filter, FilterChanges, Index, Log, Receipt,
++	RichBlock, SyncStatus, Transaction, Work, TransactionRequest,
++};
++pub use rpc_impl_EthApi::gen_server::EthApi as EthApiServer;
++pub use rpc_impl_EthFilterApi::gen_server::EthFilterApi as EthFilterApiServer;
++
++/// Eth rpc interface.
++#[rpc(server)]
++pub trait EthApi {
++	/// Returns protocol version encoded as a string (quotes are necessary).
++	#[rpc(name = "eth_protocolVersion")]
++	fn protocol_version(&self) -> Result<u64>;
++
++	/// Returns an object with data about the sync status or false. (wtf?)
++	#[rpc(name = "eth_syncing")]
++	fn syncing(&self) -> Result<SyncStatus>;
++
++	/// Returns the number of hashes per second that the node is mining with.
++	#[rpc(name = "eth_hashrate")]
++	fn hashrate(&self) -> Result<U256>;
++
++	/// Returns block author.
++	#[rpc(name = "eth_coinbase")]
++	fn author(&self) -> Result<H160>;
++
++	/// Returns true if client is actively mining new blocks.
++	#[rpc(name = "eth_mining")]
++	fn is_mining(&self) -> Result<bool>;
++
++	/// Returns the chain ID used for transaction signing at the
++	/// current best block. None is returned if not
++	/// available.
++	#[rpc(name = "eth_chainId")]
++	fn chain_id(&self) -> Result<Option<U64>>;
++
++	/// Returns current gas_price.
++	#[rpc(name = "eth_gasPrice")]
++	fn gas_price(&self) -> Result<U256>;
++
++	/// Returns accounts list.
++	#[rpc(name = "eth_accounts")]
++	fn accounts(&self) -> Result<Vec<H160>>;
++
++	/// Returns highest block number.
++	#[rpc(name = "eth_blockNumber")]
++	fn block_number(&self) -> Result<U256>;
++
++	/// Returns balance of the given account.
++	#[rpc(name = "eth_getBalance")]
++	fn balance(&self, _: H160, _: Option<BlockNumber>) -> Result<U256>;
++
++	/// Returns content of the storage at given address.
++	#[rpc(name = "eth_getStorageAt")]
++	fn storage_at(&self, _: H160, _: U256, _: Option<BlockNumber>) -> Result<H256>;
++
++	/// Returns block with given hash.
++	#[rpc(name = "eth_getBlockByHash")]
++	fn block_by_hash(&self, _: H256, _: bool) -> Result<Option<RichBlock>>;
++
++	/// Returns block with given number.
++	#[rpc(name = "eth_getBlockByNumber")]
++	fn block_by_number(&self, _: BlockNumber, _: bool) -> Result<Option<RichBlock>>;
++
++	/// Returns the number of transactions sent from given address at given time (block number).
++	#[rpc(name = "eth_getTransactionCount")]
++	fn transaction_count(&self, _: H160, _: Option<BlockNumber>) -> Result<U256>;
++
++	/// Returns the number of transactions in a block with given hash.
++	#[rpc(name = "eth_getBlockTransactionCountByHash")]
++	fn block_transaction_count_by_hash(&self, _: H256) -> Result<Option<U256>>;
++
++	/// Returns the number of transactions in a block with given block number.
++	#[rpc(name = "eth_getBlockTransactionCountByNumber")]
++	fn block_transaction_count_by_number(&self, _: BlockNumber) -> Result<Option<U256>>;
++
++	/// Returns the number of uncles in a block with given hash.
++	#[rpc(name = "eth_getUncleCountByBlockHash")]
++	fn block_uncles_count_by_hash(&self, _: H256) -> Result<U256>;
++
++	/// Returns the number of uncles in a block with given block number.
++	#[rpc(name = "eth_getUncleCountByBlockNumber")]
++	fn block_uncles_count_by_number(&self, _: BlockNumber) -> Result<U256>;
++
++	/// Returns the code at given address at given time (block number).
++	#[rpc(name = "eth_getCode")]
++	fn code_at(&self, _: H160, _: Option<BlockNumber>) -> Result<Bytes>;
++
++	/// Sends transaction; will block waiting for signer to return the
++	/// transaction hash.
++	#[rpc(name = "eth_sendTransaction")]
++	fn send_transaction(&self, _: TransactionRequest) -> BoxFuture<H256>;
++
++	/// Sends signed transaction, returning its hash.
++	#[rpc(name = "eth_sendRawTransaction")]
++	fn send_raw_transaction(&self, _: Bytes) -> BoxFuture<H256>;
++
++	/// Call contract, returning the output data.
++	#[rpc(name = "eth_call")]
++	fn call(&self, _: CallRequest, _: Option<BlockNumber>) -> Result<Bytes>;
++
++	/// Estimate gas needed for execution of given contract.
++	#[rpc(name = "eth_estimateGas")]
++	fn estimate_gas(&self, _: CallRequest, _: Option<BlockNumber>) -> Result<U256>;
++
++	/// Get transaction by its hash.
++	#[rpc(name = "eth_getTransactionByHash")]
++	fn transaction_by_hash(&self, _: H256) -> Result<Option<Transaction>>;
++
++	/// Returns transaction at given block hash and index.
++	#[rpc(name = "eth_getTransactionByBlockHashAndIndex")]
++	fn transaction_by_block_hash_and_index(
++		&self,
++		_: H256,
++		_: Index,
++	) -> Result<Option<Transaction>>;
++
++	/// Returns transaction by given block number and index.
++	#[rpc(name = "eth_getTransactionByBlockNumberAndIndex")]
++	fn transaction_by_block_number_and_index(
++		&self,
++		_: BlockNumber,
++		_: Index,
++	) -> Result<Option<Transaction>>;
++
++	/// Returns transaction receipt by transaction hash.
++	#[rpc(name = "eth_getTransactionReceipt")]
++	fn transaction_receipt(&self, _: H256) -> Result<Option<Receipt>>;
++
++	/// Returns an uncles at given block and index.
++	#[rpc(name = "eth_getUncleByBlockHashAndIndex")]
++	fn uncle_by_block_hash_and_index(&self, _: H256, _: Index) -> Result<Option<RichBlock>>;
++
++	/// Returns an uncles at given block and index.
++	#[rpc(name = "eth_getUncleByBlockNumberAndIndex")]
++	fn uncle_by_block_number_and_index(
++		&self,
++		_: BlockNumber,
++		_: Index,
++	) -> Result<Option<RichBlock>>;
++
++	/// Returns logs matching given filter object.
++	#[rpc(name = "eth_getLogs")]
++	fn logs(&self, _: Filter) -> Result<Vec<Log>>;
++
++	/// Returns the hash of the current block, the seedHash, and the boundary condition to be met.
++	#[rpc(name = "eth_getWork")]
++	fn work(&self) -> Result<Work>;
++
++	/// Used for submitting a proof-of-work solution.
++	#[rpc(name = "eth_submitWork")]
++	fn submit_work(&self, _: H64, _: H256, _: H256) -> Result<bool>;
++
++	/// Used for submitting mining hashrate.
++	#[rpc(name = "eth_submitHashrate")]
++	fn submit_hashrate(&self, _: U256, _: H256) -> Result<bool>;
++}
++
++/// Eth filters rpc api (polling).
++#[rpc(server)]
++pub trait EthFilterApi {
++	/// Returns id of new filter.
++	#[rpc(name = "eth_newFilter")]
++	fn new_filter(&self, _: Filter) -> Result<U256>;
++
++	/// Returns id of new block filter.
++	#[rpc(name = "eth_newBlockFilter")]
++	fn new_block_filter(&self) -> Result<U256>;
++
++	/// Returns id of new block filter.
++	#[rpc(name = "eth_newPendingTransactionFilter")]
++	fn new_pending_transaction_filter(&self) -> Result<U256>;
++
++	/// Returns filter changes since last poll.
++	#[rpc(name = "eth_getFilterChanges")]
++	fn filter_changes(&self, _: Index) -> Result<FilterChanges>;
++
++	/// Returns all logs matching given filter (in a range 'from' - 'to').
++	#[rpc(name = "eth_getFilterLogs")]
++	fn filter_logs(&self, _: Index) -> Result<Vec<Log>>;
++
++	/// Uninstalls filter.
++	#[rpc(name = "eth_uninstallFilter")]
++	fn uninstall_filter(&self, _: Index) -> Result<bool>;
++}
+diff --git a/client/rpc-core/src/eth_pubsub.rs b/client/rpc-core/src/eth_pubsub.rs
+new file mode 100644
+index 0000000..ada7f0c
+--- /dev/null
++++ b/client/rpc-core/src/eth_pubsub.rs
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! Eth PUB-SUB rpc interface.
++
++use jsonrpc_core::Result;
++use jsonrpc_derive::rpc;
++use jsonrpc_pubsub::{typed, SubscriptionId};
++
++use crate::types::pubsub;
++
++pub use rpc_impl_EthPubSubApi::gen_server::EthPubSubApi as EthPubSubApiServer;
++
++/// Eth PUB-SUB rpc interface.
++#[rpc(server)]
++pub trait EthPubSubApi {
++	/// RPC Metadata
++	type Metadata;
++
++	/// Subscribe to Eth subscription.
++	#[pubsub(subscription = "eth_subscription", subscribe, name = "eth_subscribe")]
++	fn subscribe(
++		&self,
++		_: Self::Metadata,
++		_: typed::Subscriber<pubsub::Result>,
++		_: pubsub::Kind,
++		_: Option<pubsub::Params>,
++	);
++
++	/// Unsubscribe from existing Eth subscription.
++	#[pubsub(subscription = "eth_subscription", unsubscribe, name = "eth_unsubscribe")]
++	fn unsubscribe(&self, _: Option<Self::Metadata>, _: SubscriptionId) -> Result<bool>;
++}
+diff --git a/client/rpc-core/src/lib.rs b/client/rpc-core/src/lib.rs
+new file mode 100644
+index 0000000..dcf0e17
+--- /dev/null
++++ b/client/rpc-core/src/lib.rs
+@@ -0,0 +1,29 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++pub mod types;
++
++mod eth;
++mod eth_pubsub;
++mod net;
++mod web3;
++
++pub use eth::{EthApi, EthApiServer, EthFilterApi, EthFilterApiServer};
++pub use eth_pubsub::{EthPubSubApi, EthPubSubApiServer};
++pub use net::{NetApi, NetApiServer};
++pub use web3::{Web3Api, Web3ApiServer};
+diff --git a/client/rpc-core/src/net.rs b/client/rpc-core/src/net.rs
+new file mode 100644
+index 0000000..9a843eb
+--- /dev/null
++++ b/client/rpc-core/src/net.rs
+@@ -0,0 +1,40 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! Net rpc interface.
++use jsonrpc_core::Result;
++use jsonrpc_derive::rpc;
++
++pub use rpc_impl_NetApi::gen_server::NetApi as NetApiServer;
++
++/// Net rpc interface.
++#[rpc(server)]
++pub trait NetApi {
++	/// Returns protocol version.
++	#[rpc(name = "net_version")]
++	fn version(&self) -> Result<String>;
++
++	/// Returns number of peers connected to node.
++	#[rpc(name = "net_peerCount")]
++	fn peer_count(&self) -> Result<u32>;
++
++	/// Returns true if client is actively listening for network connections.
++	/// Otherwise false.
++	#[rpc(name = "net_listening")]
++	fn is_listening(&self) -> Result<bool>;
++}
+diff --git a/client/rpc-core/src/types/account_info.rs b/client/rpc-core/src/types/account_info.rs
+new file mode 100644
+index 0000000..56997f0
+--- /dev/null
++++ b/client/rpc-core/src/types/account_info.rs
+@@ -0,0 +1,80 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! Return types for RPC calls
++
++use serde::Serialize;
++use ethereum_types::{Public, Address, H160, H256, U256};
++use crate::types::Bytes;
++
++/// Account information.
++#[derive(Debug, Default, Clone, PartialEq, Serialize)]
++pub struct AccountInfo {
++	/// Account name
++	pub name: String,
++}
++
++/// Data structure with proof for one single storage-entry
++#[derive(Debug, Default, Clone, PartialEq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct StorageProof {
++	pub key: U256,
++	pub value: U256,
++	pub proof: Vec<Bytes>
++}
++
++/// Account information.
++#[derive(Debug, Default, Clone, PartialEq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct EthAccount {
++	pub address: H160,
++	pub balance: U256,
++	pub nonce: U256,
++	pub code_hash: H256,
++	pub storage_hash: H256,
++	pub account_proof: Vec<Bytes>,
++	pub storage_proof: Vec<StorageProof>,
++}
++
++/// Extended account information (used by `parity_allAccountInfo`).
++#[derive(Debug, Default, Clone, PartialEq, Serialize)]
++pub struct ExtAccountInfo {
++	/// Account name
++	pub name: String,
++	/// Account meta JSON
++	pub meta: String,
++	/// Account UUID (`None` for address book entries)
++	#[serde(skip_serializing_if = "Option::is_none")]
++	pub uuid: Option<String>,
++}
++
++/// account derived from a signature
++/// as well as information that tells if it is valid for
++/// the current chain
++#[derive(Debug, Clone, Serialize)]
++#[serde(rename_all="camelCase")]
++pub struct RecoveredAccount {
++	/// address of the recovered account
++	pub address: Address,
++	/// public key of the recovered account
++	pub public_key: Public,
++	/// If the signature contains chain replay protection,
++	/// And the chain_id encoded within the signature
++	/// matches the current chain this would be true, otherwise false.
++	pub is_valid_for_current_chain: bool
++}
+diff --git a/client/rpc-core/src/types/block.rs b/client/rpc-core/src/types/block.rs
+new file mode 100644
+index 0000000..257f2cc
+--- /dev/null
++++ b/client/rpc-core/src/types/block.rs
+@@ -0,0 +1,172 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use std::ops::Deref;
++use std::collections::BTreeMap;
++
++use ethereum_types::{H160, H256, U256, Bloom as H2048};
++use serde::ser::Error;
++use serde::{Serialize, Serializer};
++use crate::types::{Bytes, Transaction};
++
++/// Block Transactions
++#[derive(Debug)]
++pub enum BlockTransactions {
++	/// Only hashes
++	Hashes(Vec<H256>),
++	/// Full transactions
++	Full(Vec<Transaction>)
++}
++
++impl Serialize for BlockTransactions {
++	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
++	where S: Serializer {
++		match *self {
++			BlockTransactions::Hashes(ref hashes) => hashes.serialize(serializer),
++			BlockTransactions::Full(ref ts) => ts.serialize(serializer)
++		}
++	}
++}
++
++/// Block representation
++#[derive(Debug, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct Block {
++	/// Hash of the block
++	pub hash: Option<H256>,
++	/// Hash of the parent
++	pub parent_hash: H256,
++	/// Hash of the uncles
++	#[serde(rename = "sha3Uncles")]
++	pub uncles_hash: H256,
++	/// Authors address
++	pub author: H160,
++	/// Alias of `author`
++	pub miner: H160,
++	/// State root hash
++	pub state_root: H256,
++	/// Transactions root hash
++	pub transactions_root: H256,
++	/// Transactions receipts root hash
++	pub receipts_root: H256,
++	/// Block number
++	pub number: Option<U256>,
++	/// Gas Used
++	pub gas_used: U256,
++	/// Gas Limit
++	pub gas_limit: U256,
++	/// Extra data
++	pub extra_data: Bytes,
++	/// Logs bloom
++	pub logs_bloom: Option<H2048>,
++	/// Timestamp
++	pub timestamp: U256,
++	/// Difficulty
++	pub difficulty: U256,
++	/// Total difficulty
++	pub total_difficulty: Option<U256>,
++	/// Seal fields
++	pub seal_fields: Vec<Bytes>,
++	/// Uncles' hashes
++	pub uncles: Vec<H256>,
++	/// Transactions
++	pub transactions: BlockTransactions,
++	/// Size in bytes
++	pub size: Option<U256>,
++}
++
++/// Block header representation.
++#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
++#[serde(rename_all = "camelCase")]
++pub struct Header {
++	/// Hash of the block
++	pub hash: Option<H256>,
++	/// Hash of the parent
++	pub parent_hash: H256,
++	/// Hash of the uncles
++	#[serde(rename = "sha3Uncles")]
++	pub uncles_hash: H256,
++	/// Authors address
++	pub author: H160,
++	/// Alias of `author`
++	pub miner: H160,
++	/// State root hash
++	pub state_root: H256,
++	/// Transactions root hash
++	pub transactions_root: H256,
++	/// Transactions receipts root hash
++	pub receipts_root: H256,
++	/// Block number
++	pub number: Option<U256>,
++	/// Gas Used
++	pub gas_used: U256,
++	/// Gas Limit
++	pub gas_limit: U256,
++	/// Extra data
++	pub extra_data: Bytes,
++	/// Logs bloom
++	pub logs_bloom: H2048,
++	/// Timestamp
++	pub timestamp: U256,
++	/// Difficulty
++	pub difficulty: U256,
++	/// Seal fields
++	pub seal_fields: Vec<Bytes>,
++	/// Size in bytes
++	pub size: Option<U256>,
++}
++
++/// Block representation with additional info.
++pub type RichBlock = Rich<Block>;
++
++/// Header representation with additional info.
++pub type RichHeader = Rich<Header>;
++
++/// Value representation with additional info
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Rich<T> {
++	/// Standard value.
++	pub inner: T,
++	/// Engine-specific fields with additional description.
++	/// Should be included directly to serialized block object.
++	// TODO [ToDr] #[serde(skip_serializing)]
++	pub extra_info: BTreeMap<String, String>,
++}
++
++impl<T> Deref for Rich<T> {
++	type Target = T;
++	fn deref(&self) -> &Self::Target {
++		&self.inner
++	}
++}
++
++impl<T: Serialize> Serialize for Rich<T> {
++	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
++		use serde_json::{to_value, Value};
++
++		let serialized = (to_value(&self.inner), to_value(&self.extra_info));
++		if let (Ok(Value::Object(mut value)), Ok(Value::Object(extras))) = serialized {
++			// join two objects
++			value.extend(extras);
++			// and serialize
++			value.serialize(serializer)
++		} else {
++			Err(S::Error::custom("Unserializable structures: expected objects"))
++		}
++	}
++}
+diff --git a/client/rpc-core/src/types/block_number.rs b/client/rpc-core/src/types/block_number.rs
+new file mode 100644
+index 0000000..116ea48
+--- /dev/null
++++ b/client/rpc-core/src/types/block_number.rs
+@@ -0,0 +1,182 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use std::fmt;
++use serde::{Deserialize, Deserializer, Serialize, Serializer};
++use serde::de::{Error, Visitor, MapAccess};
++use ethereum_types::H256;
++
++/// Represents rpc api block number param.
++#[derive(Debug, PartialEq, Clone, Hash, Eq)]
++pub enum BlockNumber {
++	/// Hash
++	Hash {
++		/// block hash
++		hash: H256,
++		/// only return blocks part of the canon chain
++		require_canonical: bool,
++	},
++	/// Number
++	Num(u64),
++	/// Latest block
++	Latest,
++	/// Earliest block (genesis)
++	Earliest,
++	/// Pending block (being mined)
++	Pending,
++}
++
++impl Default for BlockNumber {
++	fn default() -> Self {
++		BlockNumber::Latest
++	}
++}
++
++impl<'a> Deserialize<'a> for BlockNumber {
++	fn deserialize<D>(deserializer: D) -> Result<BlockNumber, D::Error> where D: Deserializer<'a> {
++		deserializer.deserialize_any(BlockNumberVisitor)
++	}
++}
++
++impl BlockNumber {
++	/// Convert block number to min block target.
++	pub fn to_min_block_num(&self) -> Option<u64> {
++		match *self {
++			BlockNumber::Num(ref x) => Some(*x),
++			_ => None,
++		}
++	}
++}
++
++impl Serialize for BlockNumber {
++	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
++		match *self {
++			BlockNumber::Hash{ hash, require_canonical } => serializer.serialize_str(
++				&format!("{{ 'hash': '{}', 'requireCanonical': '{}'  }}", hash, require_canonical)
++			),
++			BlockNumber::Num(ref x) => serializer.serialize_str(&format!("0x{:x}", x)),
++			BlockNumber::Latest => serializer.serialize_str("latest"),
++			BlockNumber::Earliest => serializer.serialize_str("earliest"),
++			BlockNumber::Pending => serializer.serialize_str("pending"),
++		}
++	}
++}
++
++struct BlockNumberVisitor;
++
++impl<'a> Visitor<'a> for BlockNumberVisitor {
++	type Value = BlockNumber;
++
++	fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
++		write!(formatter, "a block number or 'latest', 'earliest' or 'pending'")
++	}
++
++	fn visit_map<V>(self, mut visitor: V) -> Result<Self::Value, V::Error> where V: MapAccess<'a> {
++		let (mut require_canonical, mut block_number, mut block_hash) = (false, None::<u64>, None::<H256>);
++
++		loop {
++			let key_str: Option<String> = visitor.next_key()?;
++
++			match key_str {
++				Some(key) => match key.as_str() {
++					"blockNumber" => {
++						let value: String = visitor.next_value()?;
++						if value.starts_with("0x") {
++							let number = u64::from_str_radix(&value[2..], 16).map_err(|e| {
++								Error::custom(format!("Invalid block number: {}", e))
++							})?;
++
++							block_number = Some(number);
++							break;
++						} else {
++							return Err(Error::custom("Invalid block number: missing 0x prefix".to_string()))
++						}
++					}
++					"blockHash" => {
++						block_hash = Some(visitor.next_value()?);
++					}
++					"requireCanonical" => {
++						require_canonical = visitor.next_value()?;
++					}
++					key => {
++						return Err(Error::custom(format!("Unknown key: {}", key)))
++					}
++				}
++				None => {
++					break
++				}
++			};
++		}
++
++		if let Some(number) = block_number {
++			return Ok(BlockNumber::Num(number))
++		}
++
++		if let Some(hash) = block_hash {
++			return Ok(BlockNumber::Hash { hash, require_canonical })
++		}
++
++		return Err(Error::custom("Invalid input"))
++	}
++
++	fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> where E: Error {
++		match value {
++			"latest" => Ok(BlockNumber::Latest),
++			"earliest" => Ok(BlockNumber::Earliest),
++			"pending" => Ok(BlockNumber::Pending),
++			_ if value.starts_with("0x") => u64::from_str_radix(&value[2..], 16).map(BlockNumber::Num).map_err(|e| {
++				Error::custom(format!("Invalid block number: {}", e))
++			}),
++			_ => u64::from_str_radix(&value, 10).map(BlockNumber::Num).map_err(|_| {
++				Error::custom("Invalid block number: non-decimal or missing 0x prefix".to_string())
++			}),
++		}
++	}
++
++	fn visit_string<E>(self, value: String) -> Result<Self::Value, E> where E: Error {
++		self.visit_str(value.as_ref())
++	}
++
++	fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> where E: Error {
++		Ok(BlockNumber::Num(value))
++	}
++}
++
++
++#[cfg(test)]
++mod tests {
++	use super::*;
++
++	fn match_block_number(block_number: BlockNumber) -> Option<u64> {
++		match block_number {
++			BlockNumber::Num(number) => Some(number),
++			_ => None
++		}
++	}
++
++	#[test]
++	fn block_number_deserialize() {
++		let bn_dec: BlockNumber = serde_json::from_str(r#""42""#).unwrap();
++		let bn_hex: BlockNumber = serde_json::from_str(r#""0x45""#).unwrap();
++		let bn_u64: BlockNumber = serde_json::from_str(r#"420"#).unwrap();
++
++		assert_eq!(match_block_number(bn_dec).unwrap(), 42 as u64);
++		assert_eq!(match_block_number(bn_hex).unwrap(), 69 as u64);
++		assert_eq!(match_block_number(bn_u64).unwrap(), 420 as u64);
++	}
++}
+diff --git a/client/rpc-core/src/types/bytes.rs b/client/rpc-core/src/types/bytes.rs
+new file mode 100644
+index 0000000..0e46eff
+--- /dev/null
++++ b/client/rpc-core/src/types/bytes.rs
+@@ -0,0 +1,123 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! Serializable wrapper around vector of bytes
++
++use std::fmt;
++use rustc_hex::{ToHex, FromHex};
++use serde::{Serialize, Serializer, Deserialize, Deserializer};
++use serde::de::{Error, Visitor};
++
++/// Wrapper structure around vector of bytes.
++#[derive(Debug, PartialEq, Eq, Default, Hash, Clone)]
++pub struct Bytes(pub Vec<u8>);
++
++impl Bytes {
++	/// Simple constructor.
++	pub fn new(bytes: Vec<u8>) -> Bytes {
++		Bytes(bytes)
++	}
++	/// Convert back to vector
++	pub fn into_vec(self) -> Vec<u8> {
++		self.0
++	}
++}
++
++impl From<Vec<u8>> for Bytes {
++	fn from(bytes: Vec<u8>) -> Bytes {
++		Bytes(bytes)
++	}
++}
++
++impl Into<Vec<u8>> for Bytes {
++	fn into(self) -> Vec<u8> {
++		self.0
++	}
++}
++
++impl Serialize for Bytes {
++	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
++	where S: Serializer
++	{
++		let mut serialized = "0x".to_owned();
++		serialized.push_str(self.0.to_hex::<String>().as_ref());
++		serializer.serialize_str(serialized.as_ref())
++	}
++}
++
++impl<'a> Deserialize<'a> for Bytes {
++	fn deserialize<D>(deserializer: D) -> Result<Bytes, D::Error>
++	where D: Deserializer<'a> {
++		deserializer.deserialize_any(BytesVisitor)
++	}
++}
++
++struct BytesVisitor;
++
++impl<'a> Visitor<'a> for BytesVisitor {
++	type Value = Bytes;
++
++	fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
++		write!(formatter, "a 0x-prefixed, hex-encoded vector of bytes")
++	}
++
++	fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> where E: Error {
++		if value.len() >= 2 && value.starts_with("0x") && value.len() & 1 == 0 {
++			Ok(Bytes::new(FromHex::from_hex(&value[2..]).map_err(|e| Error::custom(format!("Invalid hex: {}", e)))?))
++		} else {
++			Err(Error::custom("Invalid bytes format. Expected a 0x-prefixed hex string with even length"))
++		}
++	}
++
++	fn visit_string<E>(self, value: String) -> Result<Self::Value, E> where E: Error {
++		self.visit_str(value.as_ref())
++	}
++}
++
++#[cfg(test)]
++mod tests {
++	use super::*;
++	use rustc_hex::FromHex;
++
++	#[test]
++	fn test_bytes_serialize() {
++		let bytes = Bytes("0123456789abcdef".from_hex().unwrap());
++		let serialized = serde_json::to_string(&bytes).unwrap();
++		assert_eq!(serialized, r#""0x0123456789abcdef""#);
++	}
++
++	#[test]
++	fn test_bytes_deserialize() {
++		let bytes0: Result<Bytes, serde_json::Error> = serde_json::from_str(r#""∀∂""#);
++		let bytes1: Result<Bytes, serde_json::Error> = serde_json::from_str(r#""""#);
++		let bytes2: Result<Bytes, serde_json::Error> = serde_json::from_str(r#""0x123""#);
++		let bytes3: Result<Bytes, serde_json::Error> = serde_json::from_str(r#""0xgg""#);
++
++		let bytes4: Bytes = serde_json::from_str(r#""0x""#).unwrap();
++		let bytes5: Bytes = serde_json::from_str(r#""0x12""#).unwrap();
++		let bytes6: Bytes = serde_json::from_str(r#""0x0123""#).unwrap();
++
++		assert!(bytes0.is_err());
++		assert!(bytes1.is_err());
++		assert!(bytes2.is_err());
++		assert!(bytes3.is_err());
++		assert_eq!(bytes4, Bytes(vec![]));
++		assert_eq!(bytes5, Bytes(vec![0x12]));
++		assert_eq!(bytes6, Bytes(vec![0x1, 0x23]));
++	}
++}
+diff --git a/client/rpc-core/src/types/call_request.rs b/client/rpc-core/src/types/call_request.rs
+new file mode 100644
+index 0000000..339cfbe
+--- /dev/null
++++ b/client/rpc-core/src/types/call_request.rs
+@@ -0,0 +1,42 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use serde::Deserialize;
++use ethereum_types::{H160, U256};
++use crate::types::Bytes;
++
++/// Call request
++#[derive(Debug, Default, PartialEq, Deserialize, Clone)]
++#[serde(deny_unknown_fields)]
++#[serde(rename_all = "camelCase")]
++pub struct CallRequest {
++	/// From
++	pub from: Option<H160>,
++	/// To
++	pub to: Option<H160>,
++	/// Gas Price
++	pub gas_price: Option<U256>,
++	/// Gas
++	pub gas: Option<U256>,
++	/// Value
++	pub value: Option<U256>,
++	/// Data
++	pub data: Option<Bytes>,
++	/// Nonce
++	pub nonce: Option<U256>,
++}
+diff --git a/client/rpc-core/src/types/filter.rs b/client/rpc-core/src/types/filter.rs
+new file mode 100644
+index 0000000..34bf75f
+--- /dev/null
++++ b/client/rpc-core/src/types/filter.rs
+@@ -0,0 +1,345 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++use std::{sync::{Arc, Mutex}, collections::BTreeMap};
++use ethereum_types::{H160, H256, U256};
++use serde::de::{Error, DeserializeOwned};
++use serde::{Deserialize, Deserializer, Serialize, Serializer};
++use serde_json::{Value, from_value};
++
++use crate::types::{BlockNumber, Log};
++
++/// Variadic value
++#[derive(Debug, PartialEq, Eq, Clone, Hash)]
++pub enum VariadicValue<T> where T: DeserializeOwned {
++	/// Single
++	Single(T),
++	/// List
++	Multiple(Vec<T>),
++	/// None
++	Null,
++}
++
++impl<'a, T> Deserialize<'a> for VariadicValue<T> where T: DeserializeOwned {
++	fn deserialize<D>(deserializer: D) -> Result<VariadicValue<T>, D::Error>
++	where D: Deserializer<'a> {
++		let v: Value = Deserialize::deserialize(deserializer)?;
++
++		if v.is_null() {
++			return Ok(VariadicValue::Null);
++		}
++
++		from_value(v.clone()).map(VariadicValue::Single)
++			.or_else(|_| from_value(v).map(VariadicValue::Multiple))
++			.map_err(|err| D::Error::custom(format!("Invalid variadic value type: {}", err)))
++	}
++}
++
++/// Filter Address
++pub type FilterAddress = VariadicValue<H160>;
++/// Topic, supports `A` | `null` | `[A,B,C]` | `[A,[B,C]]` | [null,[B,C]] | [null,[null,C]]
++pub type Topic = VariadicValue<Option<
++	VariadicValue<Option<H256>>
++>>;
++/// FlatTopic, simplifies the matching logic.
++pub type FlatTopic = VariadicValue<Option<H256>>;
++
++/// Filter
++#[derive(Debug, PartialEq, Clone, Deserialize, Eq, Hash)]
++#[serde(deny_unknown_fields)]
++#[serde(rename_all = "camelCase")]
++pub struct Filter {
++	/// From Block
++	pub from_block: Option<BlockNumber>,
++	/// To Block
++	pub to_block: Option<BlockNumber>,
++	/// Block hash
++	pub block_hash: Option<H256>,
++	/// Address
++	pub address: Option<FilterAddress>,
++	/// Topics
++	pub topics: Option<Topic>,
++}
++
++/// Helper for Filter matching.
++/// Supports conditional indexed parameters and wildcards.
++#[derive(Debug)]
++pub struct FilteredParams {
++	pub filter: Option<Filter>,
++	flat_topics: Vec<FlatTopic>,
++}
++
++impl Default for FilteredParams {
++	fn default() -> Self {
++		FilteredParams {
++			filter: None,
++			flat_topics: Vec::new()
++		}
++	}
++}
++
++impl FilteredParams {
++	pub fn new(
++		f: Option<Filter>,
++	) -> Self {
++		if let Some(f) = f {
++			return FilteredParams {
++				filter: Some(f.clone()),
++				flat_topics: {
++					if let Some(t) = f.clone().topics {
++						Self::flatten(&t)
++					} else { Vec:: new() }
++				}
++			};
++		}
++		Self::default()
++	}
++	/// Cartesian product for VariadicValue conditional indexed parameters.
++	/// Executed once on struct instance.
++	/// i.e. `[A,[B,C]]` to `[[A,B],[A,C]]`.
++	fn flatten(topic: &Topic) -> Vec<FlatTopic> {
++		fn cartesian(lists: &Vec<Vec<Option<H256>>>) -> Vec<Vec<Option<H256>>> {
++			let mut res = vec![];
++			let mut list_iter = lists.iter();
++			if let Some(first_list) = list_iter.next() {
++				for &i in first_list {
++					res.push(vec![i]);
++				}
++			}
++			for l in list_iter {
++				let mut tmp = vec![];
++				for r in res {
++					for &el in l {
++						let mut tmp_el = r.clone();
++						tmp_el.push(el);
++						tmp.push(tmp_el);
++					}
++				}
++				res = tmp;
++			}
++			res
++		}
++		let mut out: Vec<FlatTopic> = Vec::new();
++		match topic {
++			VariadicValue::Multiple(multi) => {
++				let mut foo: Vec<Vec<Option<H256>>> = Vec::new();
++				for v in multi {
++					foo.push({
++						if let Some(v) = v {
++							match v {
++								VariadicValue::Single(s) => {
++									vec![s.clone()]
++								},
++								VariadicValue::Multiple(s) => {
++									s.clone()
++								},
++								VariadicValue::Null => {
++									vec![None]
++								},
++							}
++						} else  {
++							vec![None]
++						}
++					});
++				}
++				for permut in cartesian(&foo) {
++					out.push(FlatTopic::Multiple(permut));
++				}
++			},
++			VariadicValue::Single(single) => {
++				if let Some(single) = single {
++					out.push(single.clone());
++				}
++			},
++			VariadicValue::Null => {
++				out.push(FlatTopic::Null);
++			},
++		}
++		out
++	}
++
++	/// Replace None values - aka wildcards - for the log input value in that position.
++	pub fn replace(&self, log: &Log, topic: FlatTopic) -> Option<Vec<H256>> {
++		let mut out: Vec<H256> = Vec::new();
++		match topic {
++			VariadicValue::Single(value) => {
++				if let Some(value) = value {
++					out.push(value);
++				}
++			},
++			VariadicValue::Multiple(value) => {
++				for (k, v) in value.into_iter().enumerate() {
++					if let Some(v) = v {
++						out.push(v);
++					} else {
++						out.push(log.topics[k].clone());
++					}
++				}
++			},
++			_ => {}
++		};
++		if out.len() == 0 {
++			return None;
++		}
++		Some(out)
++	}
++
++	pub fn filter_block_range(
++		&self,
++		block_number: u64
++	) -> bool {
++		let mut out = true;
++		let filter = self.filter.clone().unwrap();
++		if let Some(from) = filter.from_block {
++			match from {
++				BlockNumber::Num(_) => {
++					if from.to_min_block_num().unwrap_or(0 as u64) > block_number {
++						out = false;
++					}
++				},
++				_ => {}
++			}
++		}
++		if let Some(to) = filter.to_block {
++			match to {
++				BlockNumber::Num(_) => {
++					if to.to_min_block_num().unwrap_or(0 as u64) < block_number {
++						out = false;
++					}
++				},
++				BlockNumber::Earliest => {
++					out = false;
++				},
++				_ => {}
++			}
++		}
++		out
++	}
++
++	pub fn filter_block_hash(
++		&self,
++		block_hash: H256
++	) -> bool {
++		if let Some(h) = self.filter.clone().unwrap().block_hash {
++			if h != block_hash { return false; }
++		}
++		true
++	}
++
++	pub fn filter_address(
++		&self,
++		log: &Log
++	) -> bool {
++		if let Some(input_address) = &self.filter.clone().unwrap().address {
++			match input_address {
++				VariadicValue::Single(x) => {
++					if log.address != *x { return false; }
++				},
++				VariadicValue::Multiple(x) => {
++					if !x.contains(&log.address) { return false; }
++				},
++				_ => { return true; }
++			}
++		}
++		true
++	}
++
++	pub fn filter_topics(
++		&self,
++		log: &Log
++	) -> bool {
++		let mut out: bool = true;
++		for topic in self.flat_topics.clone() {
++			match topic {
++				VariadicValue::Single(single) => {
++					if let Some(single) = single {
++						if !log.topics.starts_with(&vec![single]) {
++							out = false;
++						}
++					}
++				},
++				VariadicValue::Multiple(multi) => {
++					// Shrink the topics until the last item is Some.
++					let mut new_multi = multi;
++					while new_multi.iter().last().unwrap_or(&Some(H256::default())).is_none() {
++						new_multi.pop();
++					}
++					// We can discard right away any logs with lesser topics than the filter.
++					if new_multi.len() > log.topics.len() {
++						out = false;
++						break;
++					}
++					let replaced: Option<Vec<H256>> = self.replace(log, VariadicValue::Multiple(new_multi));
++					if let Some(replaced) = replaced {
++						out = false;
++						if log.topics.starts_with(
++							&replaced[..]
++						) {
++							out = true;
++							break;
++						}
++					}
++				},
++				_ => {
++					out = true;
++				}
++			}
++		}
++		out
++	}
++}
++
++/// Results of the filter_changes RPC.
++#[derive(Debug, PartialEq)]
++pub enum FilterChanges {
++	/// New logs.
++	Logs(Vec<Log>),
++	/// New hashes (block or transactions)
++	Hashes(Vec<H256>),
++	/// Empty result,
++	Empty,
++}
++
++impl Serialize for FilterChanges {
++	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error> where S: Serializer {
++		match *self {
++			FilterChanges::Logs(ref logs) => logs.serialize(s),
++			FilterChanges::Hashes(ref hashes) => hashes.serialize(s),
++			FilterChanges::Empty => (&[] as &[Value]).serialize(s),
++		}
++	}
++
++
++}
++
++#[derive(Debug, Clone)]
++pub enum FilterType {
++	Block,
++	PendingTransaction,
++	Log(Filter)
++}
++
++#[derive(Debug, Clone)]
++pub struct FilterPoolItem {
++	pub last_poll: BlockNumber,
++	pub filter_type: FilterType,
++	pub at_block: u64
++}
++
++/// On-memory stored filters created through the `eth_newFilter` RPC.
++pub type FilterPool = Arc<Mutex<BTreeMap<U256, FilterPoolItem>>>;
++
+diff --git a/client/rpc-core/src/types/index.rs b/client/rpc-core/src/types/index.rs
+new file mode 100644
+index 0000000..3b18082
+--- /dev/null
++++ b/client/rpc-core/src/types/index.rs
+@@ -0,0 +1,81 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use std::fmt;
++use serde::{Deserialize, Deserializer};
++use serde::de::{Error, Visitor};
++
++/// Represents usize.
++#[derive(Debug, PartialEq)]
++pub struct Index(usize);
++
++impl Index {
++	/// Convert to usize
++	pub fn value(&self) -> usize {
++		self.0
++	}
++}
++
++impl<'a> Deserialize<'a> for Index {
++	fn deserialize<D>(deserializer: D) -> Result<Index, D::Error>
++	where D: Deserializer<'a> {
++		deserializer.deserialize_any(IndexVisitor)
++	}
++}
++
++struct IndexVisitor;
++
++impl<'a> Visitor<'a> for IndexVisitor {
++	type Value = Index;
++
++	fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
++		write!(formatter, "a hex-encoded or decimal index")
++	}
++
++	fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> where E: Error {
++		match value {
++			_ if value.starts_with("0x") => usize::from_str_radix(&value[2..], 16).map(Index).map_err(|e| {
++				Error::custom(format!("Invalid index: {}", e))
++			}),
++			_ => value.parse::<usize>().map(Index).map_err(|e| {
++				Error::custom(format!("Invalid index: {}", e))
++			}),
++		}
++	}
++
++	fn visit_string<E>(self, value: String) -> Result<Self::Value, E> where E: Error {
++		self.visit_str(value.as_ref())
++	}
++
++	fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> where E: Error {
++		Ok(Index(value as usize))
++	}
++}
++
++#[cfg(test)]
++mod tests {
++	use super::*;
++	use serde_json;
++
++	#[test]
++	fn index_deserialization() {
++		let s = r#"["0xa", "10", 42]"#;
++		let deserialized: Vec<Index> = serde_json::from_str(s).unwrap();
++		assert_eq!(deserialized, vec![Index(10), Index(10), Index(42)]);
++	}
++}
+diff --git a/client/rpc-core/src/types/log.rs b/client/rpc-core/src/types/log.rs
+new file mode 100644
+index 0000000..9248a53
+--- /dev/null
++++ b/client/rpc-core/src/types/log.rs
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use serde::Serialize;
++use ethereum_types::{H160, H256, U256};
++use crate::types::Bytes;
++
++/// Log
++#[derive(Debug, Serialize, PartialEq, Eq, Hash, Clone)]
++#[serde(rename_all = "camelCase")]
++pub struct Log {
++	/// H160
++	pub address: H160,
++	/// Topics
++	pub topics: Vec<H256>,
++	/// Data
++	pub data: Bytes,
++	/// Block Hash
++	pub block_hash: Option<H256>,
++	/// Block Number
++	pub block_number: Option<U256>,
++	/// Transaction Hash
++	pub transaction_hash: Option<H256>,
++	/// Transaction Index
++	pub transaction_index: Option<U256>,
++	/// Log Index in Block
++	pub log_index: Option<U256>,
++	/// Log Index in Transaction
++	pub transaction_log_index: Option<U256>,
++	/// Whether Log Type is Removed (Geth Compatibility Field)
++	#[serde(default)]
++	pub removed: bool,
++}
+diff --git a/client/rpc-core/src/types/mod.rs b/client/rpc-core/src/types/mod.rs
+new file mode 100644
+index 0000000..bac5643
+--- /dev/null
++++ b/client/rpc-core/src/types/mod.rs
+@@ -0,0 +1,57 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! RPC types
++
++mod account_info;
++mod block;
++mod block_number;
++mod bytes;
++mod call_request;
++mod filter;
++mod index;
++mod log;
++mod receipt;
++mod sync;
++mod transaction;
++mod transaction_request;
++mod work;
++
++pub mod pubsub;
++
++pub use self::account_info::{AccountInfo, ExtAccountInfo, EthAccount, StorageProof, RecoveredAccount};
++pub use self::bytes::Bytes;
++pub use self::block::{RichBlock, Block, BlockTransactions, Header, RichHeader, Rich};
++pub use self::block_number::BlockNumber;
++pub use self::call_request::CallRequest;
++pub use self::filter::{
++	Filter, FilterChanges, FilterPool, FilterPoolItem, FilterType, VariadicValue, FilterAddress,
++	Topic, FilteredParams,
++};
++pub use self::index::Index;
++pub use self::log::Log;
++pub use self::receipt::Receipt;
++pub use self::sync::{
++	SyncStatus, SyncInfo, Peers, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo,
++	TransactionStats, ChainStatus, EthProtocolInfo, PipProtocolInfo,
++};
++pub use self::transaction::{
++	Transaction, RichRawTransaction, LocalTransactionStatus, PendingTransactions, PendingTransaction,
++};
++pub use self::transaction_request::TransactionRequest;
++pub use self::work::Work;
+diff --git a/client/rpc-core/src/types/pubsub.rs b/client/rpc-core/src/types/pubsub.rs
+new file mode 100644
+index 0000000..43fea60
+--- /dev/null
++++ b/client/rpc-core/src/types/pubsub.rs
+@@ -0,0 +1,103 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! Pub-Sub types.
++
++use ethereum_types::H256;
++use serde::{Deserialize, Deserializer, Serialize, Serializer};
++use serde::de::Error;
++use serde_json::{Value, from_value};
++use crate::types::{RichHeader, Filter, Log};
++
++/// Subscription result.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum Result {
++	/// New block header.
++	Header(Box<RichHeader>),
++	/// Log
++	Log(Box<Log>),
++	/// Transaction hash
++	TransactionHash(H256),
++	/// SyncStatus
++	SyncState(PubSubSyncStatus)
++}
++
++/// PubSbub sync status
++#[derive(Debug, Serialize, Eq, PartialEq, Clone)]
++#[serde(rename_all="camelCase")]
++pub struct PubSubSyncStatus {
++	/// is_major_syncing?
++	pub syncing: bool,
++}
++
++impl Serialize for Result {
++	fn serialize<S>(&self, serializer: S) -> ::std::result::Result<S::Ok, S::Error>
++		where S: Serializer
++	{
++		match *self {
++			Result::Header(ref header) => header.serialize(serializer),
++			Result::Log(ref log) => log.serialize(serializer),
++			Result::TransactionHash(ref hash) => hash.serialize(serializer),
++			Result::SyncState(ref sync) => sync.serialize(serializer),
++		}
++	}
++}
++
++/// Subscription kind.
++#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone)]
++#[serde(deny_unknown_fields)]
++#[serde(rename_all = "camelCase")]
++pub enum Kind {
++	/// New block headers subscription.
++	NewHeads,
++	/// Logs subscription.
++	Logs,
++	/// New Pending Transactions subscription.
++	NewPendingTransactions,
++	/// Node syncing status subscription.
++	Syncing,
++}
++
++/// Subscription kind.
++#[derive(Debug, PartialEq, Eq, Hash, Clone)]
++pub enum Params {
++	/// No parameters passed.
++	None,
++	/// Log parameters.
++	Logs(Filter),
++}
++
++impl Default for Params {
++	fn default() -> Self {
++		Params::None
++	}
++}
++
++impl<'a> Deserialize<'a> for Params {
++	fn deserialize<D>(deserializer: D) -> ::std::result::Result<Params, D::Error>
++	where D: Deserializer<'a> {
++		let v: Value = Deserialize::deserialize(deserializer)?;
++
++		if v.is_null() {
++			return Ok(Params::None);
++		}
++
++		from_value(v.clone()).map(Params::Logs)
++			.map_err(|e| D::Error::custom(format!("Invalid Pub-Sub parameters: {}", e)))
++	}
++}
+diff --git a/client/rpc-core/src/types/receipt.rs b/client/rpc-core/src/types/receipt.rs
+new file mode 100644
+index 0000000..f803cae
+--- /dev/null
++++ b/client/rpc-core/src/types/receipt.rs
+@@ -0,0 +1,57 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use serde::Serialize;
++use ethereum_types::{H160, H256, U64, U256, Bloom as H2048};
++use crate::types::Log;
++
++/// Receipt
++#[derive(Debug, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct Receipt {
++	/// Transaction Hash
++	pub transaction_hash: Option<H256>,
++	/// Transaction index
++	pub transaction_index: Option<U256>,
++	/// Block hash
++	pub block_hash: Option<H256>,
++	/// Sender
++	pub from: Option<H160>,
++	/// Recipient
++	pub to: Option<H160>,
++	/// Block number
++	pub block_number: Option<U256>,
++	/// Cumulative gas used
++	pub cumulative_gas_used: U256,
++	/// Gas used
++	pub gas_used: Option<U256>,
++	/// Contract address
++	pub contract_address: Option<H160>,
++	/// Logs
++	pub logs: Vec<Log>,
++	/// State Root
++	// NOTE(niklasad1): EIP98 makes this optional field, if it's missing then skip serializing it
++	#[serde(skip_serializing_if = "Option::is_none", rename = "root")]
++	pub state_root: Option<H256>,
++	/// Logs bloom
++	pub logs_bloom: H2048,
++	/// Status code
++	// NOTE(niklasad1): Unknown after EIP98 rules, if it's missing then skip serializing it
++	#[serde(skip_serializing_if = "Option::is_none", rename = "status")]
++	pub status_code: Option<U64>,
++}
+diff --git a/client/rpc-core/src/types/sync.rs b/client/rpc-core/src/types/sync.rs
+new file mode 100644
+index 0000000..c3b7336
+--- /dev/null
++++ b/client/rpc-core/src/types/sync.rs
+@@ -0,0 +1,144 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use std::collections::BTreeMap;
++
++use ethereum_types::{U256, H512};
++use serde::{Serialize, Serializer};
++
++/// Sync info
++#[derive(Default, Debug, Serialize, PartialEq)]
++#[serde(rename_all = "camelCase")]
++pub struct SyncInfo {
++	/// Starting block
++	pub starting_block: U256,
++	/// Current block
++	pub current_block: U256,
++	/// Highest block seen so far
++	pub highest_block: U256,
++	/// Warp sync snapshot chunks total.
++	pub warp_chunks_amount: Option<U256>,
++	/// Warp sync snpashot chunks processed.
++	pub warp_chunks_processed: Option<U256>,
++}
++
++/// Peers info
++#[derive(Default, Debug, Serialize)]
++pub struct Peers {
++	/// Number of active peers
++	pub active: usize,
++	/// Number of connected peers
++	pub connected: usize,
++	/// Max number of peers
++	pub max: u32,
++	/// Detailed information on peers
++	pub peers: Vec<PeerInfo>,
++}
++
++/// Peer connection information
++#[derive(Default, Debug, Serialize)]
++pub struct PeerInfo {
++	/// Public node id
++	pub id: Option<String>,
++	/// Node client ID
++	pub name: String,
++	/// Capabilities
++	pub caps: Vec<String>,
++	/// Network information
++	pub network: PeerNetworkInfo,
++	/// Protocols information
++	pub protocols: PeerProtocolsInfo,
++}
++
++/// Peer network information
++#[derive(Default, Debug, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct PeerNetworkInfo {
++	/// Remote endpoint address
++	pub remote_address: String,
++	/// Local endpoint address
++	pub local_address: String,
++}
++
++/// Peer protocols information
++#[derive(Default, Debug, Serialize)]
++pub struct PeerProtocolsInfo {
++	/// Ethereum protocol information
++	pub eth: Option<EthProtocolInfo>,
++	/// PIP protocol information.
++	pub pip: Option<PipProtocolInfo>,
++}
++
++/// Peer Ethereum protocol information
++#[derive(Default, Debug, Serialize)]
++pub struct EthProtocolInfo {
++	/// Negotiated ethereum protocol version
++	pub version: u32,
++	/// Peer total difficulty if known
++	pub difficulty: Option<U256>,
++	/// SHA3 of peer best block hash
++	pub head: String,
++}
++
++/// Peer PIP protocol information
++#[derive(Default, Debug, Serialize)]
++pub struct PipProtocolInfo {
++	/// Negotiated PIP protocol version
++	pub version: u32,
++	/// Peer total difficulty
++	pub difficulty: U256,
++	/// SHA3 of peer best block hash
++	pub head: String,
++}
++
++/// Sync status
++#[derive(Debug, PartialEq)]
++pub enum SyncStatus {
++	/// Info when syncing
++	Info(SyncInfo),
++	/// Not syncing
++	None
++}
++
++impl Serialize for SyncStatus {
++	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
++	where S: Serializer {
++		match *self {
++			SyncStatus::Info(ref info) => info.serialize(serializer),
++			SyncStatus::None => false.serialize(serializer)
++		}
++	}
++}
++
++/// Propagation statistics for pending transaction.
++#[derive(Default, Debug, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct TransactionStats {
++	/// Block no this transaction was first seen.
++	pub first_seen: u64,
++	/// Peers this transaction was propagated to with count.
++	pub propagated_to: BTreeMap<H512, usize>,
++}
++
++/// Chain status.
++#[derive(Default, Debug, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct ChainStatus {
++	/// Describes the gap in the blockchain, if there is one: (first, last)
++	pub block_gap: Option<(U256, U256)>,
++}
+diff --git a/client/rpc-core/src/types/transaction.rs b/client/rpc-core/src/types/transaction.rs
+new file mode 100644
+index 0000000..77485a6
+--- /dev/null
++++ b/client/rpc-core/src/types/transaction.rs
+@@ -0,0 +1,170 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use std::{sync::{Arc, Mutex}, collections::HashMap};
++use serde::{Serialize, Serializer};
++use serde::ser::SerializeStruct;
++use ethereum_types::{H160, H256, H512, U64, U256};
++use crate::types::Bytes;
++
++/// Transaction
++#[derive(Debug, Default, Clone, PartialEq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct Transaction {
++	/// Hash
++	pub hash: H256,
++	/// Nonce
++	pub nonce: U256,
++	/// Block hash
++	pub block_hash: Option<H256>,
++	/// Block number
++	pub block_number: Option<U256>,
++	/// Transaction Index
++	pub transaction_index: Option<U256>,
++	/// Sender
++	pub from: H160,
++	/// Recipient
++	pub to: Option<H160>,
++	/// Transfered value
++	pub value: U256,
++	/// Gas Price
++	pub gas_price: U256,
++	/// Gas
++	pub gas: U256,
++	/// Data
++	pub input: Bytes,
++	/// Creates contract
++	pub creates: Option<H160>,
++	/// Raw transaction data
++	pub raw: Bytes,
++	/// Public key of the signer.
++	pub public_key: Option<H512>,
++	/// The network id of the transaction, if any.
++	pub chain_id: Option<U64>,
++	/// The standardised V field of the signature (0 or 1).
++	pub standard_v: U256,
++	/// The standardised V field of the signature.
++	pub v: U256,
++	/// The R field of the signature.
++	pub r: U256,
++	/// The S field of the signature.
++	pub s: U256,
++}
++
++/// Local Transaction Status
++#[derive(Debug)]
++pub enum LocalTransactionStatus {
++	/// Transaction is pending
++	Pending,
++	/// Transaction is in future part of the queue
++	Future,
++	/// Transaction was mined.
++	Mined(Transaction),
++	/// Transaction was removed from the queue, but not mined.
++	Culled(Transaction),
++	/// Transaction was dropped because of limit.
++	Dropped(Transaction),
++	/// Transaction was replaced by transaction with higher gas price.
++	Replaced(Transaction, U256, H256),
++	/// Transaction never got into the queue.
++	Rejected(Transaction, String),
++	/// Transaction is invalid.
++	Invalid(Transaction),
++	/// Transaction was canceled.
++	Canceled(Transaction),
++}
++
++impl Serialize for LocalTransactionStatus {
++	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
++		where S: Serializer
++	{
++		use self::LocalTransactionStatus::*;
++
++		let elems = match *self {
++			Pending | Future => 1,
++			Mined(..) | Culled(..) | Dropped(..) | Invalid(..) | Canceled(..) => 2,
++			Rejected(..) => 3,
++			Replaced(..) => 4,
++		};
++
++		let status = "status";
++		let transaction = "transaction";
++
++		let mut struc = serializer.serialize_struct("LocalTransactionStatus", elems)?;
++		match *self {
++			Pending => struc.serialize_field(status, "pending")?,
++			Future => struc.serialize_field(status, "future")?,
++			Mined(ref tx) => {
++				struc.serialize_field(status, "mined")?;
++				struc.serialize_field(transaction, tx)?;
++			},
++			Culled(ref tx) => {
++				struc.serialize_field(status, "culled")?;
++				struc.serialize_field(transaction, tx)?;
++			},
++			Dropped(ref tx) => {
++				struc.serialize_field(status, "dropped")?;
++				struc.serialize_field(transaction, tx)?;
++			},
++			Canceled(ref tx) => {
++				struc.serialize_field(status, "canceled")?;
++				struc.serialize_field(transaction, tx)?;
++			},
++			Invalid(ref tx) => {
++				struc.serialize_field(status, "invalid")?;
++				struc.serialize_field(transaction, tx)?;
++			},
++			Rejected(ref tx, ref reason) => {
++				struc.serialize_field(status, "rejected")?;
++				struc.serialize_field(transaction, tx)?;
++				struc.serialize_field("error", reason)?;
++			},
++			Replaced(ref tx, ref gas_price, ref hash) => {
++				struc.serialize_field(status, "replaced")?;
++				struc.serialize_field(transaction, tx)?;
++				struc.serialize_field("hash", hash)?;
++				struc.serialize_field("gasPrice", gas_price)?;
++			},
++		}
++
++		struc.end()
++	}
++}
++
++/// Geth-compatible output for eth_signTransaction method
++#[derive(Debug, Default, Clone, PartialEq, Serialize)]
++pub struct RichRawTransaction {
++	/// Raw transaction RLP
++	pub raw: Bytes,
++	/// Transaction details
++	#[serde(rename = "tx")]
++	pub transaction: Transaction
++}
++
++pub struct PendingTransaction {
++	pub transaction: Transaction,
++	pub at_block: u64
++}
++
++impl PendingTransaction {
++	pub fn new(transaction: Transaction, at_block: u64) -> Self {
++		Self { transaction, at_block }
++	}
++}
++
++pub type PendingTransactions = Option<Arc<Mutex<HashMap<H256, PendingTransaction>>>>;
+diff --git a/client/rpc-core/src/types/transaction_request.rs b/client/rpc-core/src/types/transaction_request.rs
+new file mode 100644
+index 0000000..3b1fea0
+--- /dev/null
++++ b/client/rpc-core/src/types/transaction_request.rs
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! `TransactionRequest` type
++
++use serde::{Serialize, Deserialize};
++use ethereum_types::{H160, U256};
++use crate::types::Bytes;
++
++/// Transaction request coming from RPC
++#[derive(Debug, Clone, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++#[serde(rename_all = "camelCase")]
++pub struct TransactionRequest {
++	/// Sender
++	pub from: Option<H160>,
++	/// Recipient
++	pub to: Option<H160>,
++	/// Gas Price
++	pub gas_price: Option<U256>,
++	/// Gas
++	pub gas: Option<U256>,
++	/// Value of transaction in wei
++	pub value: Option<U256>,
++	/// Additional data sent with transaction
++	pub data: Option<Bytes>,
++	/// Transaction's nonce
++	pub nonce: Option<U256>,
++}
+diff --git a/client/rpc-core/src/types/work.rs b/client/rpc-core/src/types/work.rs
+new file mode 100644
+index 0000000..2dcc6ba
+--- /dev/null
++++ b/client/rpc-core/src/types/work.rs
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use ethereum_types::{H256, U256};
++
++use serde::{Serialize, Serializer};
++
++/// The result of an `eth_getWork` call: it differs based on an option
++/// whether to send the block number.
++#[derive(Debug, PartialEq, Eq)]
++pub struct Work {
++	/// The proof-of-work hash.
++	pub pow_hash: H256,
++	/// The seed hash.
++	pub seed_hash: H256,
++	/// The target.
++	pub target: H256,
++	/// The block number: this isn't always stored.
++	pub number: Option<u64>,
++}
++
++impl Serialize for Work {
++	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error> where S: Serializer {
++		match self.number.as_ref() {
++			Some(num) => (&self.pow_hash, &self.seed_hash, &self.target, U256::from(*num)).serialize(s),
++			None => (&self.pow_hash, &self.seed_hash, &self.target).serialize(s),
++		}
++	}
++}
+diff --git a/client/rpc-core/src/web3.rs b/client/rpc-core/src/web3.rs
+new file mode 100644
+index 0000000..c957d1a
+--- /dev/null
++++ b/client/rpc-core/src/web3.rs
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2015-2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++//! Web3 rpc interface.
++use ethereum_types::H256;
++use jsonrpc_core::Result;
++use jsonrpc_derive::rpc;
++
++use crate::types::Bytes;
++
++pub use rpc_impl_Web3Api::gen_server::Web3Api as Web3ApiServer;
++
++/// Web3 rpc interface.
++#[rpc(server)]
++pub trait Web3Api {
++	/// Returns current client version.
++	#[rpc(name = "web3_clientVersion")]
++	fn client_version(&self) -> Result<String>;
++
++	/// Returns sha3 of the given data
++	#[rpc(name = "web3_sha3")]
++	fn sha3(&self, _: Bytes) -> Result<H256>;
++}
+diff --git a/client/rpc/Cargo.toml b/client/rpc/Cargo.toml
+new file mode 100644
+index 0000000..d675975
+--- /dev/null
++++ b/client/rpc/Cargo.toml
+@@ -0,0 +1,41 @@
++[package]
++name = "fc-rpc"
++version = "0.1.0"
++authors = ["Parity Technologies <admin@parity.io>"]
++edition = "2018"
++description = "Ethereum RPC (web3) compatibility layer for Substrate."
++license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
++
++[dependencies]
++jsonrpc-core = "15.0.0"
++jsonrpc-derive = "14.0.3"
++jsonrpc-core-client = "14.0.3"
++jsonrpc-pubsub = "15.0.0"
++log = "0.4.8"
++ethereum-types = "0.10.0"
++fc-consensus = { path = "../consensus" }
++fc-rpc-core = { path = "../rpc-core" }
++fp-rpc = { path = "../../primitives/rpc" }
++sp-io = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-runtime = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-api = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-transaction-pool = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-storage = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-blockchain = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sc-service = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sc-client-api = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sc-rpc = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sc-network = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++pallet-evm = { path = "../../frame/evm" }
++pallet-ethereum = { path = "../../frame/ethereum" }
++ethereum = { version = "0.6", features = ["with-codec"] }
++codec = { package = "parity-scale-codec", version = "1.0.0" }
++rlp = "0.5"
++futures = { version = "0.3.1", features = ["compat"] }
++sha3 = "0.8"
++rustc-hex = { version = "2.1.0", default-features = false }
++libsecp256k1 = "0.3"
++rand = "0.7"
++
++[features]
++rpc_binary_search_estimate = []
+diff --git a/client/rpc/src/eth.rs b/client/rpc/src/eth.rs
+new file mode 100644
+index 0000000..7dac05c
+--- /dev/null
++++ b/client/rpc/src/eth.rs
+@@ -0,0 +1,1548 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++use std::{marker::PhantomData, sync::Arc};
++use std::collections::BTreeMap;
++use ethereum::{
++	Block as EthereumBlock, Transaction as EthereumTransaction
++};
++use ethereum_types::{H160, H256, H64, U256, U64, H512};
++use jsonrpc_core::{BoxFuture, Result, futures::future::{self, Future}};
++use futures::future::TryFutureExt;
++use sp_runtime::{
++	traits::{Block as BlockT, UniqueSaturatedInto, Zero, One, Saturating, BlakeTwo256},
++	transaction_validity::TransactionSource
++};
++use sp_api::{ProvideRuntimeApi, BlockId, Core, HeaderT};
++use sp_transaction_pool::{TransactionPool, InPoolTransaction};
++use sc_client_api::backend::{StorageProvider, Backend, StateBackend, AuxStore};
++use sha3::{Keccak256, Digest};
++use sp_blockchain::{Error as BlockChainError, HeaderMetadata, HeaderBackend};
++use sc_network::{NetworkService, ExHashT};
++use fc_rpc_core::{
++	EthApi as EthApiT, NetApi as NetApiT, Web3Api as Web3ApiT, EthFilterApi as EthFilterApiT
++};
++use fc_rpc_core::types::{
++	BlockNumber, Bytes, CallRequest, Filter, FilteredParams, FilterChanges, FilterPool, FilterPoolItem,
++	FilterType, Index, Log, Receipt, RichBlock, SyncStatus, SyncInfo, Transaction, Work, Rich, Block,
++	BlockTransactions, TransactionRequest, PendingTransactions, PendingTransaction,
++};
++use fp_rpc::{EthereumRuntimeRPCApi, ConvertTransaction, TransactionStatus};
++use crate::{internal_err, error_on_execution_failure, EthSigner, public_key};
++
++pub use fc_rpc_core::{EthApiServer, NetApiServer, Web3ApiServer, EthFilterApiServer};
++use codec::{self, Encode};
++
++pub struct EthApi<B: BlockT, C, P, CT, BE, H: ExHashT> {
++	pool: Arc<P>,
++	client: Arc<C>,
++	convert_transaction: CT,
++	network: Arc<NetworkService<B, H>>,
++	is_authority: bool,
++	signers: Vec<Box<dyn EthSigner>>,
++	pending_transactions: PendingTransactions,
++	_marker: PhantomData<(B, BE)>,
++}
++
++impl<B: BlockT, C, P, CT, BE, H: ExHashT> EthApi<B, C, P, CT, BE, H> {
++	pub fn new(
++		client: Arc<C>,
++		pool: Arc<P>,
++		convert_transaction: CT,
++		network: Arc<NetworkService<B, H>>,
++		pending_transactions: PendingTransactions,
++		signers: Vec<Box<dyn EthSigner>>,
++		is_authority: bool,
++	) -> Self {
++		Self {
++			client,
++			pool,
++			convert_transaction,
++			network,
++			is_authority,
++			signers,
++			pending_transactions,
++			_marker: PhantomData,
++		}
++	}
++}
++
++fn rich_block_build(
++	block: ethereum::Block,
++	statuses: Vec<Option<TransactionStatus>>,
++	hash: Option<H256>,
++	full_transactions: bool
++) -> RichBlock {
++	Rich {
++		inner: Block {
++			hash: Some(hash.unwrap_or_else(|| {
++				H256::from_slice(
++					Keccak256::digest(&rlp::encode(&block.header)).as_slice()
++				)
++			})),
++			parent_hash: block.header.parent_hash,
++			uncles_hash: block.header.ommers_hash,
++			author: block.header.beneficiary,
++			miner: block.header.beneficiary,
++			state_root: block.header.state_root,
++			transactions_root: block.header.transactions_root,
++			receipts_root: block.header.receipts_root,
++			number: Some(block.header.number),
++			gas_used: block.header.gas_used,
++			gas_limit: block.header.gas_limit,
++			extra_data: Bytes(block.header.extra_data.clone()),
++			logs_bloom: Some(block.header.logs_bloom),
++			timestamp: U256::from(block.header.timestamp / 1000),
++			difficulty: block.header.difficulty,
++			total_difficulty: None,
++			seal_fields: vec![
++				Bytes(block.header.mix_hash.as_bytes().to_vec()),
++				Bytes(block.header.nonce.as_bytes().to_vec())
++			],
++			uncles: vec![],
++			transactions: {
++				if full_transactions {
++					BlockTransactions::Full(
++						block.transactions.iter().enumerate().map(|(index, transaction)|{
++							transaction_build(
++								transaction.clone(),
++								Some(block.clone()),
++								Some(statuses[index].clone().unwrap_or_default())
++							)
++						}).collect()
++					)
++				} else {
++					BlockTransactions::Hashes(
++						block.transactions.iter().map(|transaction|{
++							H256::from_slice(
++								Keccak256::digest(&rlp::encode(&transaction.clone())).as_slice()
++							)
++						}).collect()
++					)
++				}
++			},
++			size: Some(U256::from(rlp::encode(&block).len() as u32))
++		},
++		extra_info: BTreeMap::new()
++	}
++}
++
++fn transaction_build(
++	transaction: EthereumTransaction,
++	block: Option<EthereumBlock>,
++	status: Option<TransactionStatus>
++) -> Transaction {
++	let pubkey = match public_key(&transaction) {
++		Ok(p) => Some(p),
++		Err(_e) => None,
++	};
++
++	Transaction {
++		hash: H256::from_slice(
++			Keccak256::digest(&rlp::encode(&transaction)).as_slice()
++		),
++		nonce: transaction.nonce,
++		block_hash: block.as_ref().map_or(None, |block| {
++			Some(H256::from_slice(
++				Keccak256::digest(&rlp::encode(&block.header)).as_slice()
++			))
++		}),
++		block_number: block.as_ref().map(|block| block.header.number),
++		transaction_index: status.as_ref().map(|status| {
++			U256::from(
++				UniqueSaturatedInto::<u32>::unique_saturated_into(
++					status.transaction_index
++				)
++			)
++		}),
++		from: status.as_ref().map_or({
++			match pubkey {
++				Some(pk) => H160::from(
++					H256::from_slice(Keccak256::digest(&pk).as_slice())
++				),
++				_ => H160::default()
++			}
++		}, |status| status.from),
++		to: status.as_ref().map_or({
++			match transaction.action {
++				ethereum::TransactionAction::Call(to) => Some(to),
++				_ => None
++			}
++		}, |status| status.to),
++		value: transaction.value,
++		gas_price: transaction.gas_price,
++		gas: transaction.gas_limit,
++		input: Bytes(transaction.clone().input),
++		creates: status.as_ref().map_or(None, |status| status.contract_address),
++		raw: Bytes(rlp::encode(&transaction).to_vec()),
++		public_key: pubkey.as_ref().map(|pk| H512::from(pk)),
++		chain_id: transaction.signature.chain_id().map(U64::from),
++		standard_v: U256::from(transaction.signature.standard_v()),
++		v: U256::from(transaction.signature.v()),
++		r: U256::from(transaction.signature.r().as_bytes()),
++		s: U256::from(transaction.signature.s().as_bytes()),
++	}
++}
++
++fn logs_build(
++	filter: Filter,
++	blocks_and_statuses: Vec<(EthereumBlock, Vec<TransactionStatus>)>
++) -> Vec<Log> {
++	let params = FilteredParams::new(Some(filter.clone()));
++	let mut ret = Vec::new();
++	for (block, statuses) in blocks_and_statuses {
++		let mut block_log_index: u32 = 0;
++		let block_hash = H256::from_slice(
++			Keccak256::digest(&rlp::encode(&block.header)).as_slice()
++		);
++		for status in statuses.iter() {
++			let logs = status.logs.clone();
++			let mut transaction_log_index: u32 = 0;
++			let transaction_hash = status.transaction_hash;
++			for ethereum_log in logs {
++				let mut log = Log {
++					address: ethereum_log.address.clone(),
++					topics: ethereum_log.topics.clone(),
++					data: Bytes(ethereum_log.data.clone()),
++					block_hash: None,
++					block_number: None,
++					transaction_hash: None,
++					transaction_index: None,
++					log_index: None,
++					transaction_log_index: None,
++					removed: false,
++				};
++				let mut add: bool = true;
++				if let (
++					Some(_),
++					Some(_)
++				) = (
++					filter.address.clone(),
++					filter.topics.clone(),
++				) {
++					if !params.filter_address(&log) || !params.filter_topics(&log) {
++						add = false;
++					}
++				} else if let Some(_) = filter.address {
++					if !params.filter_address(&log) {
++						add = false;
++					}
++				} else if let Some(_) = &filter.topics {
++					if !params.filter_topics(&log) {
++						add = false;
++					}
++				}
++				if add {
++					log.block_hash = Some(block_hash);
++					log.block_number = Some(block.header.number.clone());
++					log.transaction_hash = Some(transaction_hash);
++					log.transaction_index = Some(U256::from(status.transaction_index));
++					log.log_index = Some(U256::from(block_log_index));
++					log.transaction_log_index = Some(U256::from(transaction_log_index));
++					ret.push(log);
++				}
++				transaction_log_index += 1;
++				block_log_index += 1;
++			}
++		}
++	}
++	ret
++}
++
++impl<B, C, P, CT, BE, H: ExHashT> EthApi<B, C, P, CT, BE, H> where
++	C: ProvideRuntimeApi<B> + StorageProvider<B, BE> + AuxStore,
++	C: HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
++	C::Api: EthereumRuntimeRPCApi<B>,
++	BE: Backend<B> + 'static,
++	BE::State: StateBackend<BlakeTwo256>,
++	B: BlockT<Hash=H256> + Send + Sync + 'static,
++	C: Send + Sync + 'static,
++	P: TransactionPool<Block=B> + Send + Sync + 'static,
++	CT: ConvertTransaction<<B as BlockT>::Extrinsic> + Send + Sync + 'static,
++{
++	fn native_block_id(&self, number: Option<BlockNumber>) -> Result<Option<BlockId<B>>> {
++		Ok(match number.unwrap_or(BlockNumber::Latest) {
++			BlockNumber::Hash { hash, .. } => {
++				self.load_hash(hash).unwrap_or(None)
++			},
++			BlockNumber::Num(number) => {
++				Some(BlockId::Number(number.unique_saturated_into()))
++			},
++			BlockNumber::Latest => {
++				Some(BlockId::Hash(
++					self.client.info().best_hash
++				))
++			},
++			BlockNumber::Earliest => {
++				Some(BlockId::Number(Zero::zero()))
++			},
++			BlockNumber::Pending => {
++				None
++			}
++		})
++	}
++
++	// Asumes there is only one mapped canonical block in the AuxStore, otherwise something is wrong
++	fn load_hash(&self, hash: H256) -> Result<Option<BlockId<B>>> {
++		let hashes = match fc_consensus::load_block_hash::<B, _>(self.client.as_ref(), hash)
++			.map_err(|err| internal_err(format!("fetch aux store failed: {:?}", err)))?
++		{
++			Some(hashes) => hashes,
++			None => return Ok(None),
++		};
++		let out: Vec<H256> = hashes.into_iter()
++			.filter_map(|h| {
++				if self.is_canon(h) {
++					Some(h)
++				} else {
++					None
++				}
++			}).collect();
++
++		if out.len() == 1 {
++			return Ok(Some(
++				BlockId::Hash(out[0])
++			));
++		}
++		Ok(None)
++	}
++
++	fn is_canon(&self, target_hash: H256) -> bool {
++		if let Ok(Some(number)) = self.client.number(target_hash) {
++			if let Ok(Some(header)) = self.client.header(BlockId::Number(number)) {
++				return header.hash() == target_hash;
++			}
++		}
++		false
++	}
++
++	fn load_transactions(&self, transaction_hash: H256) -> Result<Option<(H256, u32)>> {
++		let mut transactions: Vec<(H256, u32)> = Vec::new();
++		match fc_consensus::load_transaction_metadata(
++			self.client.as_ref(),
++			transaction_hash,
++		).map_err(|err| internal_err(format!("fetch aux store failed: {:?}", err)))? {
++			Some(metadata) => {
++				for (block_hash, index) in metadata {
++					match self.load_hash(block_hash)
++						.map_err(|err| internal_err(format!("{:?}", err)))?
++					{
++						Some(_) => {
++							transactions.push((block_hash, index));
++						},
++						_ => {},
++					};
++				}
++			},
++			None => return Ok(None),
++		};
++
++		if transactions.len() == 1 {
++			return Ok(Some(transactions[0]));
++		}
++		Ok(None)
++	}
++}
++
++impl<B, C, P, CT, BE, H: ExHashT> EthApiT for EthApi<B, C, P, CT, BE, H> where
++	C: ProvideRuntimeApi<B> + StorageProvider<B, BE> + AuxStore,
++	C: HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
++	C::Api: EthereumRuntimeRPCApi<B>,
++	BE: Backend<B> + 'static,
++	BE::State: StateBackend<BlakeTwo256>,
++	B: BlockT<Hash=H256> + Send + Sync + 'static,
++	C: Send + Sync + 'static,
++	P: TransactionPool<Block=B> + Send + Sync + 'static,
++	CT: ConvertTransaction<<B as BlockT>::Extrinsic> + Send + Sync + 'static,
++{
++	fn protocol_version(&self) -> Result<u64> {
++		Ok(1)
++	}
++
++	fn syncing(&self) -> Result<SyncStatus> {
++		if self.network.is_major_syncing() {
++			let block_number = U256::from(
++				UniqueSaturatedInto::<u128>::unique_saturated_into(self.client.info().best_number.clone())
++			);
++			Ok(SyncStatus::Info(SyncInfo {
++				starting_block: U256::zero(),
++				current_block: block_number,
++				// TODO `highest_block` is not correct, should load `best_seen_block` from NetworkWorker,
++				// but afaik that is not currently possible in Substrate:
++				// https://github.com/paritytech/substrate/issues/7311
++				highest_block: block_number,
++				warp_chunks_amount: None,
++				warp_chunks_processed: None,
++			}))
++		} else {
++			Ok(SyncStatus::None)
++		}
++	}
++
++	fn hashrate(&self) -> Result<U256> {
++		Ok(U256::zero())
++	}
++
++	fn author(&self) -> Result<H160> {
++		let hash = self.client.info().best_hash;
++
++		Ok(
++			self.client
++			.runtime_api()
++			.author(&BlockId::Hash(hash))
++			.map_err(|err| internal_err(format!("fetch runtime chain id failed: {:?}", err)))?.into()
++		)
++	}
++
++	fn is_mining(&self) -> Result<bool> {
++		Ok(self.is_authority)
++	}
++
++	fn chain_id(&self) -> Result<Option<U64>> {
++		let hash = self.client.info().best_hash;
++		Ok(Some(self.client.runtime_api().chain_id(&BlockId::Hash(hash))
++				.map_err(|err| internal_err(format!("fetch runtime chain id failed: {:?}", err)))?.into()))
++	}
++
++	fn gas_price(&self) -> Result<U256> {
++		let hash = self.client.info().best_hash;
++		Ok(
++			self.client
++				.runtime_api()
++				.gas_price(&BlockId::Hash(hash))
++				.map_err(|err| internal_err(format!("fetch runtime chain id failed: {:?}", err)))?
++				.into(),
++		)
++	}
++
++	fn accounts(&self) -> Result<Vec<H160>> {
++		let mut accounts = Vec::new();
++		for signer in &self.signers {
++			accounts.append(&mut signer.accounts());
++		}
++		Ok(accounts)
++	}
++
++	fn block_number(&self) -> Result<U256> {
++		Ok(U256::from(UniqueSaturatedInto::<u128>::unique_saturated_into(self.client.info().best_number.clone())))
++	}
++
++	fn balance(&self, address: H160, number: Option<BlockNumber>) -> Result<U256> {
++		if let Ok(Some(id)) = self.native_block_id(number) {
++			return Ok(
++				self.client
++					.runtime_api()
++					.account_basic(&id, address)
++					.map_err(|err| internal_err(format!("fetch runtime chain id failed: {:?}", err)))?
++					.balance.into(),
++			);
++		}
++		Ok(U256::zero())
++	}
++
++	fn storage_at(&self, address: H160, index: U256, number: Option<BlockNumber>) -> Result<H256> {
++		if let Ok(Some(id)) = self.native_block_id(number) {
++			return Ok(
++				self.client
++					.runtime_api()
++					.storage_at(&id, address, index)
++					.map_err(|err| internal_err(format!("fetch runtime chain id failed: {:?}", err)))?
++					.into(),
++			);
++		}
++		Ok(H256::default())
++	}
++
++	fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
++		let id = match self.load_hash(hash)
++			.map_err(|err| internal_err(format!("{:?}", err)))?
++		{
++			Some(hash) => hash,
++			_ => return Ok(None),
++		};
++
++		let block = self.client.runtime_api().current_block(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++		let statuses = self.client.runtime_api().current_transaction_statuses(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++
++		match (block, statuses) {
++			(Some(block), Some(statuses)) => {
++				Ok(Some(rich_block_build(
++					block,
++					statuses.into_iter().map(|s| Some(s)).collect(),
++					Some(hash),
++					full,
++				)))
++			},
++			_ => {
++				Ok(None)
++			},
++		}
++	}
++
++	fn block_by_number(&self, number: BlockNumber, full: bool) -> Result<Option<RichBlock>> {
++		let id = match self.native_block_id(Some(number))? {
++			Some(id) => id,
++			None => return Ok(None),
++		};
++
++		let block = self.client.runtime_api().current_block(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++		let statuses = self.client.runtime_api().current_transaction_statuses(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++
++		match (block, statuses) {
++			(Some(block), Some(statuses)) => {
++				let hash = H256::from_slice(
++					Keccak256::digest(&rlp::encode(&block.header)).as_slice(),
++				);
++
++				Ok(Some(rich_block_build(
++					block,
++					statuses.into_iter().map(|s| Some(s)).collect(),
++					Some(hash),
++					full,
++				)))
++			},
++			_ => {
++				Ok(None)
++			},
++		}
++	}
++
++	fn transaction_count(&self, address: H160, number: Option<BlockNumber>) -> Result<U256> {
++		if let Some(BlockNumber::Pending) = number {
++			// Find future nonce
++			let id = BlockId::hash(self.client.info().best_hash);
++			let nonce: U256 = self.client.runtime_api()
++				.account_basic(&id, address)
++				.map_err(|err| internal_err(format!("fetch runtime account basic failed: {:?}", err)))?
++				.nonce;
++
++			let mut current_nonce = nonce;
++			let mut current_tag = (address, nonce).encode();
++			for tx in self.pool.ready() {
++				// since transactions in `ready()` need to be ordered by nonce
++				// it's fine to continue with current iterator.
++				if tx.provides().get(0) == Some(&current_tag) {
++					current_nonce = current_nonce.saturating_add(1.into());
++					current_tag = (address, current_nonce).encode();
++				}
++			}
++
++			return Ok(current_nonce);
++		}
++
++		let id = match self.native_block_id(number)? {
++			Some(id) => id,
++			None => return Ok(U256::zero()),
++		};
++
++		let nonce = self.client.runtime_api()
++			.account_basic(&id, address)
++			.map_err(|err| internal_err(format!("fetch runtime account basic failed: {:?}", err)))?
++			.nonce.into();
++
++		Ok(nonce)
++	}
++
++	fn block_transaction_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
++		let id = match self.load_hash(hash)
++			.map_err(|err| internal_err(format!("{:?}", err)))?
++		{
++			Some(hash) => hash,
++			_ => return Ok(None),
++		};
++
++		let block = self.client.runtime_api()
++			.current_block(&id)
++			.map_err(|err| internal_err(format!("fetch runtime account basic failed: {:?}", err)))?;
++
++		match block {
++			Some(block) => Ok(Some(U256::from(block.transactions.len()))),
++			None => Ok(None),
++		}
++	}
++
++	fn block_transaction_count_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
++		let id = match self.native_block_id(Some(number))? {
++			Some(id) => id,
++			None => return Ok(None),
++		};
++
++		let block = self.client.runtime_api()
++			.current_block(&id)
++			.map_err(|err| internal_err(format!("fetch runtime account basic failed: {:?}", err)))?;
++
++		match block {
++			Some(block) => Ok(Some(U256::from(block.transactions.len()))),
++			None => Ok(None),
++		}
++	}
++
++	fn block_uncles_count_by_hash(&self, _: H256) -> Result<U256> {
++		Ok(U256::zero())
++	}
++
++	fn block_uncles_count_by_number(&self, _: BlockNumber) -> Result<U256> {
++		Ok(U256::zero())
++	}
++
++	fn code_at(&self, address: H160, number: Option<BlockNumber>) -> Result<Bytes> {
++		if let Ok(Some(id)) = self.native_block_id(number) {
++			return Ok(
++				self.client
++					.runtime_api()
++					.account_code_at(&id, address)
++					.map_err(|err| internal_err(format!("fetch runtime chain id failed: {:?}", err)))?
++					.into(),
++			);
++		}
++		Ok(Bytes(vec![]))
++	}
++
++	fn send_transaction(&self, request: TransactionRequest) -> BoxFuture<H256> {
++		let from = match request.from {
++			Some(from) => from,
++			None => {
++				let accounts = match self.accounts() {
++					Ok(accounts) => accounts,
++					Err(e) => return Box::new(future::result(Err(e))),
++				};
++
++				match accounts.get(0) {
++					Some(account) => account.clone(),
++					None => return Box::new(future::result(Err(internal_err("no signer available")))),
++				}
++			},
++		};
++
++		let nonce = match request.nonce {
++			Some(nonce) => nonce,
++			None => {
++				match self.transaction_count(from, None) {
++					Ok(nonce) => nonce,
++					Err(e) => return Box::new(future::result(Err(e))),
++				}
++			},
++		};
++
++		let chain_id = match self.chain_id() {
++			Ok(chain_id) => chain_id,
++			Err(e) => return Box::new(future::result(Err(e))),
++		};
++
++		let message = ethereum::TransactionMessage {
++			nonce,
++			gas_price: request.gas_price.unwrap_or(U256::from(1)),
++			gas_limit: request.gas.unwrap_or(U256::max_value()),
++			value: request.value.unwrap_or(U256::zero()),
++			input: request.data.map(|s| s.into_vec()).unwrap_or_default(),
++			action: match request.to {
++				Some(to) => ethereum::TransactionAction::Call(to),
++				None => ethereum::TransactionAction::Create,
++			},
++			chain_id: chain_id.map(|s| s.as_u64()),
++		};
++
++		let mut transaction = None;
++
++		for signer in &self.signers {
++			if signer.accounts().contains(&from) {
++				match signer.sign(message, &from) {
++					Ok(t) => transaction = Some(t),
++					Err(e) => return Box::new(future::result(Err(e))),
++				}
++				break
++			}
++		}
++
++		let transaction = match transaction {
++			Some(transaction) => transaction,
++			None => return Box::new(future::result(Err(internal_err("no signer available")))),
++		};
++		let transaction_hash = H256::from_slice(
++			Keccak256::digest(&rlp::encode(&transaction)).as_slice()
++		);
++		let hash = self.client.info().best_hash;
++		let number = self.client.info().best_number;
++		let pending = self.pending_transactions.clone();
++		Box::new(
++			self.pool
++				.submit_one(
++					&BlockId::hash(hash),
++					TransactionSource::Local,
++					self.convert_transaction.convert_transaction(transaction.clone()),
++				)
++				.compat()
++				.map(move |_| {
++					if let Some(pending) = pending {
++						if let Ok(locked) = &mut pending.lock() {
++							locked.insert(
++								transaction_hash,
++								PendingTransaction::new(
++									transaction_build(transaction, None, None),
++									UniqueSaturatedInto::<u64>::unique_saturated_into(
++										number
++									)
++								)
++							);
++						}
++					}
++					transaction_hash
++				})
++				.map_err(|err| internal_err(format!("submit transaction to pool failed: {:?}", err)))
++		)
++	}
++
++	fn send_raw_transaction(&self, bytes: Bytes) -> BoxFuture<H256> {
++		let transaction = match rlp::decode::<ethereum::Transaction>(&bytes.0[..]) {
++			Ok(transaction) => transaction,
++			Err(_) => return Box::new(
++				future::result(Err(internal_err("decode transaction failed")))
++			),
++		};
++		let transaction_hash = H256::from_slice(
++			Keccak256::digest(&rlp::encode(&transaction)).as_slice()
++		);
++		let hash = self.client.info().best_hash;
++		let number = self.client.info().best_number;
++		let pending = self.pending_transactions.clone();
++		Box::new(
++			self.pool
++				.submit_one(
++					&BlockId::hash(hash),
++					TransactionSource::Local,
++					self.convert_transaction.convert_transaction(transaction.clone()),
++				)
++				.compat()
++				.map(move |_| {
++					if let Some(pending) = pending {
++						if let Ok(locked) = &mut pending.lock() {
++							locked.insert(
++								transaction_hash,
++								PendingTransaction::new(
++									transaction_build(transaction, None, None),
++									UniqueSaturatedInto::<u64>::unique_saturated_into(
++										number
++									)
++								)
++							);
++						}
++					}
++					transaction_hash
++				})
++				.map_err(|err| internal_err(format!("submit transaction to pool failed: {:?}", err)))
++		)
++	}
++
++	fn call(&self, request: CallRequest, _: Option<BlockNumber>) -> Result<Bytes> {
++		let hash = self.client.info().best_hash;
++
++		let CallRequest {
++			from,
++			to,
++			gas_price,
++			gas,
++			value,
++			data,
++			nonce
++		} = request;
++
++		let gas_limit = gas.unwrap_or(U256::max_value()); // TODO: set a limit
++		let data = data.map(|d| d.0).unwrap_or_default();
++
++		match to {
++			Some(to) => {
++				let info = self.client.runtime_api()
++					.call(
++						&BlockId::Hash(hash),
++						from.unwrap_or_default(),
++						to,
++						data,
++						value.unwrap_or_default(),
++						gas_limit,
++						gas_price,
++						nonce,
++						false,
++					)
++					.map_err(|err| internal_err(format!("runtime error: {:?}", err)))?
++					.map_err(|err| internal_err(format!("execution fatal: {:?}", err)))?;
++
++				error_on_execution_failure(&info.exit_reason, &info.value)?;
++
++				Ok(Bytes(info.value))
++			},
++			None => {
++				let info = self.client.runtime_api()
++					.create(
++						&BlockId::Hash(hash),
++						from.unwrap_or_default(),
++						data,
++						value.unwrap_or_default(),
++						gas_limit,
++						gas_price,
++						nonce,
++						false,
++					)
++					.map_err(|err| internal_err(format!("runtime error: {:?}", err)))?
++					.map_err(|err| internal_err(format!("execution fatal: {:?}", err)))?;
++
++				error_on_execution_failure(&info.exit_reason, &[])?;
++
++				Ok(Bytes(info.value[..].to_vec()))
++			},
++		}
++	}
++
++	fn estimate_gas(&self, request: CallRequest, _: Option<BlockNumber>) -> Result<U256> {
++		let calculate_gas_used = |request| {
++			let hash = self.client.info().best_hash;
++
++			let CallRequest {
++				from,
++				to,
++				gas_price,
++				gas,
++				value,
++				data,
++				nonce
++			} = request;
++
++			let gas_limit = gas.unwrap_or(U256::max_value()); // TODO: set a limit
++			let data = data.map(|d| d.0).unwrap_or_default();
++
++			let used_gas = match to {
++				Some(to) => {
++					let info = self.client.runtime_api()
++						.call(
++							&BlockId::Hash(hash),
++							from.unwrap_or_default(),
++							to,
++							data,
++							value.unwrap_or_default(),
++							gas_limit,
++							gas_price,
++							nonce,
++							true,
++						)
++						.map_err(|err| internal_err(format!("runtime error: {:?}", err)))?
++						.map_err(|err| internal_err(format!("execution fatal: {:?}", err)))?;
++
++					error_on_execution_failure(&info.exit_reason, &info.value)?;
++
++					info.used_gas
++				},
++				None => {
++					let info = self.client.runtime_api()
++						.create(
++							&BlockId::Hash(hash),
++							from.unwrap_or_default(),
++							data,
++							value.unwrap_or_default(),
++							gas_limit,
++							gas_price,
++							nonce,
++							true,
++						)
++						.map_err(|err| internal_err(format!("runtime error: {:?}", err)))?
++						.map_err(|err| internal_err(format!("execution fatal: {:?}", err)))?;
++
++					error_on_execution_failure(&info.exit_reason, &[])?;
++
++					info.used_gas
++				},
++			};
++
++			Ok(used_gas)
++		};
++		if cfg!(feature = "rpc_binary_search_estimate") {
++			let mut lower = U256::from(21_000);
++			// TODO: get a good upper limit, but below U64::max to operation overflow
++			let mut upper = U256::from(1_000_000_000);
++			let mut mid = upper;
++			let mut best = mid;
++			let mut old_best: U256;
++
++			// if the gas estimation depends on the gas limit, then we want to binary
++			// search until the change is under some threshold. but if not dependent,
++			// we want to stop immediately.
++			let mut change_pct = U256::from(100);
++			let threshold_pct = U256::from(10);
++
++			// invariant: lower <= mid <= upper
++			while change_pct > threshold_pct {
++				let mut test_request = request.clone();
++				test_request.gas = Some(mid);
++				match calculate_gas_used(test_request) {
++					// if Ok -- try to reduce the gas used
++					Ok(used_gas) => {
++						old_best = best;
++						best = used_gas;
++						change_pct = (U256::from(100) * (old_best - best)) / old_best;
++						upper = mid;
++						mid = (lower + upper + 1) / 2;
++					}
++
++					// if Err -- we need more gas
++					Err(_) => {
++						lower = mid;
++						mid = (lower + upper + 1) / 2;
++					}
++				}
++			}
++			Ok(best)
++		} else {
++			calculate_gas_used(request)
++		}
++	}
++
++	fn transaction_by_hash(&self, hash: H256) -> Result<Option<Transaction>> {
++
++		let (hash, index) = match self.load_transactions(hash)
++			.map_err(|err| internal_err(format!("{:?}", err)))? {
++			Some((hash, index)) => (hash, index as usize),
++			None => {
++				if let Some(pending) = &self.pending_transactions {
++					if let Ok(locked) = &mut pending.lock() {
++						if let Some(pending_transaction) = locked.get(&hash) {
++							return Ok(Some(pending_transaction.transaction.clone()));
++						}
++					}
++				}
++				return Ok(None);
++			},
++		};
++
++		let id = match self.load_hash(hash)
++			.map_err(|err| internal_err(format!("{:?}", err)))?
++		{
++			Some(hash) => hash,
++			_ => return Ok(None),
++		};
++
++		let block = self.client.runtime_api().current_block(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++		let statuses = self.client.runtime_api().current_transaction_statuses(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++
++		match (block, statuses) {
++			(Some(block), Some(statuses)) => {
++				Ok(Some(transaction_build(
++					block.transactions[index].clone(),
++					Some(block),
++					Some(statuses[index].clone()),
++				)))
++			},
++			_ => Ok(None)
++		}
++	}
++
++	fn transaction_by_block_hash_and_index(
++		&self,
++		hash: H256,
++		index: Index,
++	) -> Result<Option<Transaction>> {
++		let id = match self.load_hash(hash)
++			.map_err(|err| internal_err(format!("{:?}", err)))?
++		{
++			Some(hash) => hash,
++			_ => return Ok(None),
++		};
++		let index = index.value();
++
++		let block = self.client.runtime_api().current_block(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++		let statuses = self.client.runtime_api().current_transaction_statuses(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++
++		match (block, statuses) {
++			(Some(block), Some(statuses)) => {
++				Ok(Some(transaction_build(
++					block.transactions[index].clone(),
++					Some(block),
++					Some(statuses[index].clone()),
++				)))
++			},
++			_ => Ok(None)
++		}
++	}
++
++	fn transaction_by_block_number_and_index(
++		&self,
++		number: BlockNumber,
++		index: Index,
++	) -> Result<Option<Transaction>> {
++		let id = match self.native_block_id(Some(number))? {
++			Some(id) => id,
++			None => return Ok(None),
++		};
++		let index = index.value();
++
++		let block = self.client.runtime_api().current_block(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++		let statuses = self.client.runtime_api().current_transaction_statuses(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++
++		match (block, statuses) {
++			(Some(block), Some(statuses)) => {
++				Ok(Some(transaction_build(
++					block.transactions[index].clone(),
++					Some(block),
++					Some(statuses[index].clone()),
++				)))
++			},
++			_ => Ok(None)
++		}
++	}
++
++	fn transaction_receipt(&self, hash: H256) -> Result<Option<Receipt>> {
++		let (hash, index) = match self.load_transactions(hash)
++			.map_err(|err| internal_err(format!("{:?}", err)))? {
++			Some((hash, index)) => (hash, index as usize),
++			None => return Ok(None),
++		};
++
++		let id = match self.load_hash(hash)
++			.map_err(|err| internal_err(format!("{:?}", err)))?
++		{
++			Some(hash) => hash,
++			_ => return Ok(None),
++		};
++
++		let block = self.client.runtime_api().current_block(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++		let receipts = self.client.runtime_api().current_receipts(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++		let statuses = self.client.runtime_api().current_transaction_statuses(&id)
++			.map_err(|err| internal_err(format!("call runtime failed: {:?}", err)))?;
++
++		match (block, statuses, receipts) {
++			(Some(block), Some(statuses), Some(receipts)) => {
++				let block_hash = H256::from_slice(
++					Keccak256::digest(&rlp::encode(&block.header)).as_slice()
++				);
++				let receipt = receipts[index].clone();
++				let status = statuses[index].clone();
++				let mut cumulative_receipts = receipts.clone();
++				cumulative_receipts.truncate((status.transaction_index + 1) as usize);
++
++				return Ok(Some(Receipt {
++					transaction_hash: Some(status.transaction_hash),
++					transaction_index: Some(status.transaction_index.into()),
++					block_hash: Some(block_hash),
++					from: Some(status.from),
++					to: status.to,
++					block_number: Some(block.header.number),
++					cumulative_gas_used: {
++						let cumulative_gas: u32 = cumulative_receipts.iter().map(|r| {
++							r.used_gas.as_u32()
++						}).sum();
++						U256::from(cumulative_gas)
++					},
++					gas_used: Some(receipt.used_gas),
++					contract_address: status.contract_address,
++					logs: {
++						let mut pre_receipts_log_index = None;
++						if cumulative_receipts.len() > 0 {
++							cumulative_receipts.truncate(cumulative_receipts.len() - 1);
++							pre_receipts_log_index = Some(cumulative_receipts.iter().map(|r| {
++								r.logs.len() as u32
++							}).sum::<u32>());
++						}
++						receipt.logs.iter().enumerate().map(|(i, log)| {
++							Log {
++								address: log.address,
++								topics: log.topics.clone(),
++								data: Bytes(log.data.clone()),
++								block_hash: Some(block_hash),
++								block_number: Some(block.header.number),
++								transaction_hash: Some(hash),
++								transaction_index: Some(status.transaction_index.into()),
++								log_index: Some(U256::from(
++									(pre_receipts_log_index.unwrap_or(0)) + i as u32
++								)),
++								transaction_log_index: Some(U256::from(i)),
++								removed: false,
++							}
++						}).collect()
++					},
++					status_code: Some(U64::from(receipt.state_root.to_low_u64_be())),
++					logs_bloom: receipt.logs_bloom,
++					state_root: None,
++				}))
++			}
++			_ => Ok(None),
++		}
++	}
++
++	fn uncle_by_block_hash_and_index(&self, _: H256, _: Index) -> Result<Option<RichBlock>> {
++		Ok(None)
++	}
++
++	fn uncle_by_block_number_and_index(
++		&self,
++		_: BlockNumber,
++		_: Index,
++	) -> Result<Option<RichBlock>> {
++		Ok(None)
++	}
++
++	fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
++		let mut blocks_and_statuses = Vec::new();
++		if let Some(hash) = filter.block_hash.clone() {
++			let id = match self.load_hash(hash)
++				.map_err(|err| internal_err(format!("{:?}", err)))?
++			{
++				Some(hash) => hash,
++				_ => return Ok(Vec::new()),
++			};
++
++			let (block, _, statuses) = self.client.runtime_api()
++				.current_all(&id)
++				.map_err(|err| internal_err(format!("fetch runtime account basic failed: {:?}", err)))?;
++
++			if let (Some(block), Some(statuses)) = (block, statuses) {
++				blocks_and_statuses.push((block, statuses));
++			}
++		} else {
++			let best_number = self.client.info().best_number;
++			let mut current_number = filter
++				.to_block.clone()
++				.and_then(|v| v.to_min_block_num())
++				.map(|s| s.unique_saturated_into())
++				.unwrap_or(best_number);
++
++			if current_number > best_number {
++				current_number = best_number;
++			}
++
++			let from_number = filter.from_block.clone()
++				.and_then(|v| v.to_min_block_num())
++				.map(|s| s.unique_saturated_into())
++				.unwrap_or(
++					self.client.info().best_number
++				);
++			while current_number >= from_number {
++				let id = BlockId::Number(current_number);
++
++				let (block, _, statuses) = self.client.runtime_api()
++					.current_all(&id)
++					.map_err(|err| internal_err(format!("fetch runtime account basic failed: {:?}", err)))?;
++
++				if let (Some(block), Some(statuses)) = (block, statuses) {
++					blocks_and_statuses.push((block, statuses));
++				}
++
++				if current_number == Zero::zero() {
++					break
++				} else {
++					current_number = current_number.saturating_sub(One::one());
++				}
++			}
++		}
++
++		Ok(logs_build(filter,blocks_and_statuses))
++	}
++
++	fn work(&self) -> Result<Work> {
++		Ok(Work {
++			pow_hash: H256::default(),
++			seed_hash: H256::default(),
++			target: H256::default(),
++			number: None,
++		})
++	}
++
++	fn submit_work(&self, _: H64, _: H256, _: H256) -> Result<bool> {
++		Ok(false)
++	}
++
++	fn submit_hashrate(&self, _: U256, _: H256) -> Result<bool> {
++		Ok(false)
++	}
++}
++
++pub struct NetApi<B: BlockT, BE, C, H: ExHashT> {
++	client: Arc<C>,
++	network: Arc<NetworkService<B, H>>,
++	_marker: PhantomData<BE>,
++}
++
++impl<B: BlockT, BE, C, H: ExHashT> NetApi<B, BE, C, H> {
++	pub fn new(
++		client: Arc<C>,
++		network: Arc<NetworkService<B, H>>,
++	) -> Self {
++		Self {
++			client,
++			network,
++			_marker: PhantomData,
++		}
++	}
++}
++
++impl<B: BlockT, BE, C, H: ExHashT> NetApiT for NetApi<B, BE, C, H> where
++	C: ProvideRuntimeApi<B> + StorageProvider<B, BE> + AuxStore,
++	C: HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
++	C::Api: EthereumRuntimeRPCApi<B>,
++	BE: Backend<B> + 'static,
++	BE::State: StateBackend<BlakeTwo256>,
++	C: Send + Sync + 'static,
++	B: BlockT<Hash=H256> + Send + Sync + 'static,
++{
++	fn is_listening(&self) -> Result<bool> {
++		Ok(true)
++	}
++
++	fn peer_count(&self) -> Result<u32> {
++		Ok(self.network.num_connected() as u32)
++	}
++
++	fn version(&self) -> Result<String> {
++		let hash = self.client.info().best_hash;
++		Ok(self.client.runtime_api().chain_id(&BlockId::Hash(hash))
++			.map_err(|_| internal_err("fetch runtime chain id failed"))?.to_string())
++	}
++}
++
++pub struct Web3Api<B, C> {
++	client: Arc<C>,
++	_marker: PhantomData<B>,
++}
++
++impl<B, C> Web3Api<B, C> {
++	pub fn new(
++		client: Arc<C>,
++	) -> Self {
++		Self {
++			client: client,
++			_marker: PhantomData,
++		}
++	}
++}
++
++impl<B, C> Web3ApiT for Web3Api<B, C> where
++	C: ProvideRuntimeApi<B> + AuxStore,
++	C::Api: EthereumRuntimeRPCApi<B>,
++	C: HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
++	C: Send + Sync + 'static,
++	B: BlockT<Hash=H256> + Send + Sync + 'static,
++{
++	fn client_version(&self) -> Result<String> {
++		let hash = self.client.info().best_hash;
++		let version = self.client.runtime_api().version(&BlockId::Hash(hash))
++			.map_err(|err| internal_err(format!("fetch runtime version failed: {:?}", err)))?;
++		Ok(format!(
++			"{spec_name}/v{spec_version}.{impl_version}/{pkg_name}-{pkg_version}",
++			spec_name = version.spec_name,
++			spec_version = version.spec_version,
++			impl_version = version.impl_version,
++			pkg_name = env!("CARGO_PKG_NAME"),
++			pkg_version = env!("CARGO_PKG_VERSION")
++		))
++	}
++
++	fn sha3(&self, input: Bytes) -> Result<H256> {
++		Ok(H256::from_slice(
++			Keccak256::digest(&input.into_vec()).as_slice()
++		))
++	}
++}
++
++pub struct EthFilterApi<B, C> {
++	client: Arc<C>,
++	filter_pool: FilterPool,
++	max_stored_filters: usize,
++	_marker: PhantomData<B>,
++}
++
++impl<B, C> EthFilterApi<B, C> {
++	pub fn new(
++		client: Arc<C>,
++		filter_pool: FilterPool,
++		max_stored_filters: usize,
++	) -> Self {
++		Self {
++			client,
++			filter_pool,
++			max_stored_filters,
++			_marker: PhantomData,
++		}
++	}
++}
++
++impl<B, C> EthFilterApi<B, C> where
++	C: ProvideRuntimeApi<B> + AuxStore,
++	C::Api: EthereumRuntimeRPCApi<B>,
++	C: HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
++	C: Send + Sync + 'static,
++	B: BlockT<Hash=H256> + Send + Sync + 'static,
++{
++	fn create_filter(&self, filter_type: FilterType) -> Result<U256> {
++		let block_number = UniqueSaturatedInto::<u64>::unique_saturated_into(
++			self.client.info().best_number
++		);
++		let pool = self.filter_pool.clone();
++		let response = if let Ok(locked) = &mut pool.lock() {
++			if locked.len() >= self.max_stored_filters {
++				return Err(internal_err(
++					format!("Filter pool is full (limit {:?}).", self.max_stored_filters)
++				));
++			}
++			let last_key = match locked.iter().next_back() {
++				Some((k,_)) => *k,
++				None => U256::zero()
++			};
++			// Assume `max_stored_filters` is always < U256::max.
++			let key = last_key.checked_add(U256::one()).unwrap();
++			locked.insert(
++				key,
++				FilterPoolItem {
++					last_poll: BlockNumber::Num(block_number),
++					filter_type: filter_type,
++					at_block: block_number
++				}
++			);
++			Ok(key)
++		} else {
++			Err(internal_err("Filter pool is not available."))
++		};
++		response
++	}
++}
++
++impl<B, C> EthFilterApiT for EthFilterApi<B, C> where
++	C: ProvideRuntimeApi<B> + AuxStore,
++	C::Api: EthereumRuntimeRPCApi<B>,
++	C: HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
++	C: Send + Sync + 'static,
++	B: BlockT<Hash=H256> + Send + Sync + 'static,
++{
++	fn new_filter(&self, filter: Filter) -> Result<U256> {
++		self.create_filter(FilterType::Log(filter))
++	}
++
++	fn new_block_filter(&self) -> Result<U256> {
++		self.create_filter(FilterType::Block)
++	}
++
++	fn new_pending_transaction_filter(&self) -> Result<U256> {
++		Err(internal_err("Method not available."))
++	}
++
++	fn filter_changes(&self, index: Index) -> Result<FilterChanges> {
++		let key = U256::from(index.value());
++		let block_number = UniqueSaturatedInto::<u64>::unique_saturated_into(
++			self.client.info().best_number
++		);
++		let pool = self.filter_pool.clone();
++		// Try to lock.
++		let response = if let Ok(locked) = &mut pool.lock() {
++			// Try to get key.
++			if let Some(pool_item) = locked.clone().get(&key) {
++				match &pool_item.filter_type {
++					// For each block created since last poll, get a vector of ethereum hashes.
++					FilterType::Block => {
++						let last = pool_item.last_poll.to_min_block_num().unwrap();
++						let next = block_number + 1;
++						let mut ethereum_hashes: Vec<H256> = Vec::new();
++						for n in last..next {
++							let id = BlockId::Number(n.unique_saturated_into());
++							let block = self.client.runtime_api()
++								.current_block(&id)
++								.map_err(|err| internal_err(
++									format!("fetch runtime block failed: {:?}", err)
++								))?;
++							if let Some(block) = block {
++								ethereum_hashes.push(block.header.hash())
++							}
++						}
++						// Update filter `last_poll`.
++						locked.insert(
++							key,
++							FilterPoolItem {
++								last_poll: BlockNumber::Num(next),
++								filter_type: pool_item.clone().filter_type,
++								at_block: pool_item.at_block
++							}
++						);
++						Ok(FilterChanges::Hashes(ethereum_hashes))
++					},
++					// For each event since last poll, get a vector of ethereum logs.
++					FilterType::Log(filter) => {
++						// Either the filter-specific `to` block or best block.
++						let best_number = self.client.info().best_number;
++						let mut current_number = filter
++							.to_block.clone()
++							.and_then(|v| v.to_min_block_num())
++							.map(|s| s.unique_saturated_into())
++							.unwrap_or(best_number);
++
++						if current_number > best_number {
++							current_number = best_number;
++						}
++
++						// The from clause is the max(last_poll, filter_from).
++						let last_poll = pool_item
++							.last_poll
++							.to_min_block_num().unwrap()
++							.unique_saturated_into();
++
++						let filter_from = filter.from_block.clone()
++							.and_then(|v| v.to_min_block_num())
++							.map(|s| s.unique_saturated_into())
++							.unwrap_or(
++								last_poll
++							);
++
++						let from_number = std::cmp::max(last_poll, filter_from);
++						// Build the response.
++						let mut blocks_and_statuses = Vec::new();
++						while current_number >= from_number {
++							let id = BlockId::Number(current_number);
++
++							let (block, _, statuses) = self.client.runtime_api()
++								.current_all(&id)
++								.map_err(|err| internal_err(
++									format!("fetch runtime account basic failed: {:?}", err)
++								))?;
++
++							if let (Some(block), Some(statuses)) = (block, statuses) {
++								blocks_and_statuses.push((block, statuses));
++							}
++
++							if current_number == Zero::zero() {
++								break
++							} else {
++								current_number = current_number.saturating_sub(One::one());
++							}
++						}
++						// Update filter `last_poll`.
++						locked.insert(
++							key,
++							FilterPoolItem {
++								last_poll: BlockNumber::Num(
++									block_number + 1
++								),
++								filter_type: pool_item.clone().filter_type,
++								at_block: pool_item.at_block
++							}
++						);
++						Ok(FilterChanges::Logs(
++							logs_build(filter.clone(), blocks_and_statuses)
++						))
++					},
++					// Should never reach here.
++					_ => {
++						Err(internal_err("Method not available."))
++					}
++				}
++			} else {
++				Err(internal_err(format!("Filter id {:?} does not exist.", key)))
++			}
++		} else {
++			Err(internal_err("Filter pool is not available."))
++		};
++		response
++	}
++
++	fn filter_logs(&self, index: Index) -> Result<Vec<Log>> {
++		let key = U256::from(index.value());
++		let pool = self.filter_pool.clone();
++		// Try to lock.
++		let response = if let Ok(locked) = &mut pool.lock() {
++			// Try to get key.
++			if let Some(pool_item) = locked.clone().get(&key) {
++				match &pool_item.filter_type {
++					FilterType::Log(filter) => {
++						let best_number = self.client.info().best_number;
++						let mut current_number = filter
++							.to_block.clone()
++							.and_then(|v| v.to_min_block_num())
++							.map(|s| s.unique_saturated_into())
++							.unwrap_or(best_number);
++
++						if current_number > best_number {
++							current_number = best_number;
++						}
++
++						if current_number > self.client.info().best_number {
++							current_number = self.client.info().best_number;
++						}
++
++						let from_number = filter.from_block.clone()
++							.and_then(|v| v.to_min_block_num())
++							.map(|s| s.unique_saturated_into())
++							.unwrap_or(
++								self.client.info().best_number
++							);
++
++						let mut blocks_and_statuses = Vec::new();
++						while current_number >= from_number {
++							let id = BlockId::Number(current_number);
++
++							let (block, _, statuses) = self.client.runtime_api()
++								.current_all(&id)
++								.map_err(|err| internal_err(
++									format!("fetch runtime account basic failed: {:?}", err)
++								))?;
++
++							if let (Some(block), Some(statuses)) = (block, statuses) {
++								blocks_and_statuses.push((block, statuses));
++							}
++
++							if current_number == Zero::zero() {
++								break
++							} else {
++								current_number = current_number.saturating_sub(One::one());
++							}
++						}
++						Ok(logs_build(filter.clone(), blocks_and_statuses))
++					},
++					_ => Err(internal_err(
++						format!("Filter id {:?} is not a Log filter.", key)
++					))
++				}
++			} else {
++				Err(internal_err(format!("Filter id {:?} does not exist.", key)))
++			}
++		} else {
++			Err(internal_err("Filter pool is not available."))
++		};
++		response
++	}
++
++	fn uninstall_filter(&self, index: Index) -> Result<bool> {
++		let key = U256::from(index.value());
++		let pool = self.filter_pool.clone();
++		// Try to lock.
++		let response = if let Ok(locked) = &mut pool.lock() {
++			if let Some(_) = locked.remove(&key) {
++				Ok(true)
++			} else {
++				Err(internal_err(
++					format!("Filter id {:?} does not exist.", key)
++				))
++			}
++		} else {
++			Err(internal_err("Filter pool is not available."))
++		};
++		response
++	}
++}
+diff --git a/client/rpc/src/eth_pubsub.rs b/client/rpc/src/eth_pubsub.rs
+new file mode 100644
+index 0000000..d27ba87
+--- /dev/null
++++ b/client/rpc/src/eth_pubsub.rs
+@@ -0,0 +1,435 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++use std::{marker::PhantomData, sync::Arc, iter};
++use std::collections::BTreeMap;
++use rand::distributions::Alphanumeric;
++use rand::{thread_rng, Rng};
++use rustc_hex::ToHex;
++use sp_runtime::traits::{
++	Block as BlockT, BlakeTwo256,
++	UniqueSaturatedInto
++};
++use sp_transaction_pool::TransactionPool;
++use sp_api::{ProvideRuntimeApi, BlockId};
++use sp_blockchain::{Error as BlockChainError, HeaderMetadata, HeaderBackend};
++use sp_storage::{StorageKey, StorageData};
++use sp_io::hashing::twox_128;
++use sc_client_api::{
++	backend::{StorageProvider, Backend, StateBackend, AuxStore},
++	client::BlockchainEvents
++};
++use sc_rpc::Metadata;
++use log::warn;
++
++use jsonrpc_pubsub::{
++	typed::Subscriber, SubscriptionId,
++	manager::{SubscriptionManager, IdProvider}
++};
++use fc_rpc_core::EthPubSubApi::{self as EthPubSubApiT};
++use fc_rpc_core::types::{
++	Rich, Header, Bytes, Log, FilteredParams,
++	pubsub::{Kind, Params, Result as PubSubResult, PubSubSyncStatus}
++};
++use ethereum_types::{H256, U256};
++use codec::Decode;
++use sha3::{Keccak256, Digest};
++
++pub use fc_rpc_core::EthPubSubApiServer;
++use futures::{StreamExt as _, TryStreamExt as _};
++
++use jsonrpc_core::{Result as JsonRpcResult, futures::{Future, Sink}};
++use fp_rpc::{EthereumRuntimeRPCApi, TransactionStatus};
++
++use sc_network::{NetworkService, ExHashT};
++
++#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
++pub struct HexEncodedIdProvider {
++	len: usize,
++}
++
++impl Default for HexEncodedIdProvider {
++	fn default() -> Self {
++		Self { len: 16 }
++	}
++}
++
++impl IdProvider for HexEncodedIdProvider {
++	type Id = String;
++	fn next_id(&self) -> Self::Id {
++		let mut rng = thread_rng();
++		let id: String = iter::repeat(())
++			.map(|()| rng.sample(Alphanumeric))
++			.take(self.len)
++			.collect();
++		let out: String = id.as_bytes().to_hex();
++		format!("0x{}", out)
++	}
++}
++
++pub struct EthPubSubApi<B: BlockT, P, C, BE, H: ExHashT> {
++	_pool: Arc<P>,
++	client: Arc<C>,
++	network: Arc<NetworkService<B, H>>,
++	subscriptions: SubscriptionManager<HexEncodedIdProvider>,
++	_marker: PhantomData<(B, BE)>,
++}
++
++impl<B: BlockT, P, C, BE, H: ExHashT> EthPubSubApi<B, P, C, BE, H> {
++	pub fn new(
++		_pool: Arc<P>,
++		client: Arc<C>,
++		network: Arc<NetworkService<B, H>>,
++		subscriptions: SubscriptionManager<HexEncodedIdProvider>,
++	) -> Self {
++		Self { _pool, client, network, subscriptions, _marker: PhantomData }
++	}
++}
++
++struct SubscriptionResult {}
++impl SubscriptionResult {
++	pub fn new() -> Self { SubscriptionResult{} }
++	pub fn new_heads(&self, block: ethereum::Block) -> PubSubResult {
++		PubSubResult::Header(Box::new(
++			Rich {
++				inner: Header {
++					hash: Some(H256::from_slice(Keccak256::digest(
++						&rlp::encode(&block.header)
++					).as_slice())),
++					parent_hash: block.header.parent_hash,
++					uncles_hash: block.header.ommers_hash,
++					author: block.header.beneficiary,
++					miner: block.header.beneficiary,
++					state_root: block.header.state_root,
++					transactions_root: block.header.transactions_root,
++					receipts_root: block.header.receipts_root,
++					number: Some(block.header.number),
++					gas_used: block.header.gas_used,
++					gas_limit: block.header.gas_limit,
++					extra_data: Bytes(block.header.extra_data.clone()),
++					logs_bloom: block.header.logs_bloom,
++					timestamp: U256::from(block.header.timestamp),
++					difficulty: block.header.difficulty,
++					seal_fields:  vec![
++						Bytes(
++							block.header.mix_hash.as_bytes().to_vec()
++						),
++						Bytes(
++							block.header.nonce.as_bytes().to_vec()
++						)
++					],
++					size: Some(U256::from(
++						rlp::encode(&block).len() as u32
++					)),
++				},
++				extra_info: BTreeMap::new()
++			}
++		))
++	}
++	pub fn logs(
++		&self,
++		block: ethereum::Block,
++		receipts: Vec<ethereum::Receipt>,
++		params: &FilteredParams
++	) -> Vec<Log> {
++		let block_hash = Some(H256::from_slice(
++			Keccak256::digest(&rlp::encode(
++				&block.header
++			)).as_slice()
++		));
++		let mut logs: Vec<Log> = vec![];
++		let mut log_index: u32 = 0;
++		for (receipt_index, receipt) in receipts.into_iter().enumerate() {
++			let mut transaction_log_index: u32 = 0;
++			let transaction_hash: Option<H256> = if receipt.logs.len() > 0 {
++				Some(H256::from_slice(
++					Keccak256::digest(&rlp::encode(
++						&block.transactions[receipt_index as usize]
++					)).as_slice()
++				))
++			} else { None };
++			for log in receipt.logs {
++				if self.add_log(
++					block_hash.unwrap(),
++					&log,
++					&block,
++					params
++				) {
++					logs.push(Log {
++						address: log.address,
++						topics: log.topics,
++						data: Bytes(log.data),
++						block_hash: block_hash,
++						block_number: Some(block.header.number),
++						transaction_hash: transaction_hash,
++						transaction_index: Some(U256::from(log_index)),
++						log_index: Some(U256::from(log_index)),
++						transaction_log_index: Some(U256::from(
++							transaction_log_index
++						)),
++						removed: false,
++					});
++				}
++				log_index += 1;
++				transaction_log_index += 1;
++			}
++		}
++		logs
++	}
++	fn add_log(
++		&self,
++		block_hash: H256,
++		ethereum_log: &ethereum::Log,
++		block: &ethereum::Block,
++		params: &FilteredParams
++	) -> bool {
++		let log = Log {
++			address: ethereum_log.address.clone(),
++			topics: ethereum_log.topics.clone(),
++			data: Bytes(ethereum_log.data.clone()),
++			block_hash: None,
++			block_number: None,
++			transaction_hash: None,
++			transaction_index: None,
++			log_index: None,
++			transaction_log_index: None,
++			removed: false,
++		};
++		if let Some(_) = params.filter {
++			let block_number = UniqueSaturatedInto::<u64>::unique_saturated_into(
++				block.header.number
++			);
++			if !params.filter_block_range(block_number) ||
++				!params.filter_block_hash(block_hash) ||
++				!params.filter_address(&log) || !params.filter_topics(&log) {
++				return false;
++			}
++		}
++		true
++	}
++}
++
++fn storage_prefix_build(module: &[u8], storage: &[u8]) -> Vec<u8> {
++	[twox_128(module), twox_128(storage)].concat().to_vec()
++}
++
++macro_rules! stream_build {
++	($context:expr => $module:expr, $storage:expr) => {{
++		let key: StorageKey = StorageKey(
++			storage_prefix_build($module, $storage)
++		);
++		match $context.client.storage_changes_notification_stream(
++			Some(&[key]),
++			None
++		) {
++			Ok(stream) => Some(stream),
++			Err(_err) => None,
++		}
++	}};
++}
++
++impl<B: BlockT, P, C, BE, H: ExHashT> EthPubSubApiT for EthPubSubApi<B, P, C, BE, H>
++	where
++		B: BlockT<Hash=H256> + Send + Sync + 'static,
++		P: TransactionPool<Block=B> + Send + Sync + 'static,
++		C: ProvideRuntimeApi<B> + StorageProvider<B,BE> +
++			BlockchainEvents<B> + AuxStore,
++		C: HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
++		C: Send + Sync + 'static,
++		C::Api: EthereumRuntimeRPCApi<B>,
++		BE: Backend<B> + 'static,
++		BE::State: StateBackend<BlakeTwo256>,
++{
++	type Metadata = Metadata;
++	fn subscribe(
++		&self,
++		_metadata: Self::Metadata,
++		subscriber: Subscriber<PubSubResult>,
++		kind: Kind,
++		params: Option<Params>,
++	) {
++		let filtered_params = match params {
++			Some(Params::Logs(filter)) => FilteredParams::new(Some(filter)),
++			_ => FilteredParams::default()
++		};
++
++		let client = self.client.clone();
++		let network = self.network.clone();
++		match kind {
++			Kind::Logs => {
++				if let Some(stream) = stream_build!(
++					self => b"Ethereum", b"CurrentReceipts"
++				) {
++					self.subscriptions.add(subscriber, |sink| {
++						let stream = stream
++						.flat_map(move |(block_hash, changes)| {
++							let id = BlockId::Hash(block_hash);
++							let data = changes.iter().last().unwrap().2.unwrap();
++							let receipts: Vec<ethereum::Receipt> =
++								Decode::decode(&mut &data.0[..]).unwrap();
++							let block: ethereum::Block = client.runtime_api()
++								.current_block(&id).unwrap().unwrap();
++							futures::stream::iter(
++								SubscriptionResult::new()
++									.logs(block, receipts, &filtered_params)
++							)
++						})
++						.map(|x| {
++							return Ok::<Result<
++								PubSubResult,
++								jsonrpc_core::types::error::Error
++							>, ()>(Ok(
++								PubSubResult::Log(Box::new(x))
++							));
++						})
++						.compat();
++
++						sink
++							.sink_map_err(|e| warn!(
++								"Error sending notifications: {:?}", e
++							))
++							.send_all(stream)
++							.map(|_| ())
++					});
++				}
++			},
++			Kind::NewHeads => {
++				if let Some(stream) = stream_build!(
++					self => b"Ethereum", b"CurrentBlock"
++				) {
++					self.subscriptions.add(subscriber, |sink| {
++						let stream = stream
++						.map(|(_block, changes)| {
++							let data = changes.iter().last().unwrap().2.unwrap();
++							let block: ethereum::Block =
++								Decode::decode(&mut &data.0[..]).unwrap();
++							return Ok::<_, ()>(Ok(
++								SubscriptionResult::new()
++									.new_heads(block)
++							));
++						})
++						.compat();
++
++						sink
++							.sink_map_err(|e| warn!(
++								"Error sending notifications: {:?}", e
++							))
++							.send_all(stream)
++							.map(|_| ())
++					});
++				}
++			},
++			Kind::NewPendingTransactions => {
++				if let Some(stream) = stream_build!(
++					self => b"Ethereum", b"Pending"
++				) {
++					self.subscriptions.add(subscriber, |sink| {
++						let stream = stream
++						.flat_map(|(_block, changes)| {
++							let mut transactions: Vec<ethereum::Transaction> = vec![];
++							let storage: Vec<Option<StorageData>> = changes.iter()
++								.filter_map(|(o_sk, _k, v)| {
++									if o_sk.is_none() {
++										Some(v.cloned())
++									} else { None }
++								}).collect();
++							for change in storage {
++								if let Some(data) = change {
++									let storage: Vec<(
++										ethereum::Transaction,
++										TransactionStatus,
++										ethereum::Receipt
++									)> = Decode::decode(&mut &data.0[..]).unwrap();
++									let tmp: Vec<ethereum::Transaction> =
++										storage.iter().map(|x| x.0.clone()).collect();
++									transactions.extend(tmp);
++								}
++							}
++							futures::stream::iter(transactions)
++						})
++						.map(|transaction| {
++							return Ok::<Result<
++								PubSubResult,
++								jsonrpc_core::types::error::Error
++							>, ()>(Ok(
++								PubSubResult::TransactionHash(H256::from_slice(
++									Keccak256::digest(
++										&rlp::encode(&transaction)
++									).as_slice()
++								))
++							));
++						})
++						.compat();
++
++						sink
++							.sink_map_err(|e| warn!(
++								"Error sending notifications: {:?}", e
++							))
++							.send_all(stream)
++							.map(|_| ())
++					});
++				}
++			},
++			Kind::Syncing => {
++				if let Some(stream) = stream_build!(
++					self => b"Ethereum", b"CurrentBlock"
++				) {
++					self.subscriptions.add(subscriber, |sink| {
++						let mut previous_syncing = network.is_major_syncing();
++						let stream = stream
++						.filter_map(move |(_, _)| {
++							let syncing = network.is_major_syncing();
++							if previous_syncing != syncing {
++								previous_syncing = syncing;
++								futures::future::ready(Some(syncing))
++							} else {
++								futures::future::ready(None)
++							}
++						})
++						.map(|syncing| {
++							return Ok::<Result<
++								PubSubResult,
++								jsonrpc_core::types::error::Error
++							>, ()>(Ok(
++								PubSubResult::SyncState(PubSubSyncStatus {
++									syncing: syncing
++								})
++							));
++						})
++						.compat();
++						sink
++							.sink_map_err(|e| warn!(
++								"Error sending notifications: {:?}", e
++							))
++							.send_all(stream)
++							.map(|_| ())
++
++					});
++				}
++			},
++		}
++	}
++
++	fn unsubscribe(
++		&self,
++		_metadata: Option<Self::Metadata>,
++		subscription_id: SubscriptionId
++	) -> JsonRpcResult<bool> {
++		Ok(self.subscriptions.cancel(subscription_id))
++	}
++}
+diff --git a/client/rpc/src/lib.rs b/client/rpc/src/lib.rs
+new file mode 100644
+index 0000000..cfb32c7
+--- /dev/null
++++ b/client/rpc/src/lib.rs
+@@ -0,0 +1,181 @@
++// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2020 Parity Technologies (UK) Ltd.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++mod eth;
++mod eth_pubsub;
++
++pub use eth::{
++	EthApi, EthApiServer, EthFilterApi, EthFilterApiServer, NetApi, NetApiServer, Web3Api, Web3ApiServer
++};
++pub use eth_pubsub::{EthPubSubApi, EthPubSubApiServer, HexEncodedIdProvider};
++
++use ethereum_types::{H160, H256};
++use ethereum::{
++	Transaction as EthereumTransaction, TransactionMessage as EthereumTransactionMessage,
++};
++use jsonrpc_core::{ErrorCode, Error, Value};
++use rustc_hex::ToHex;
++use pallet_evm::ExitReason;
++use sha3::{Digest, Keccak256};
++
++pub fn internal_err<T: ToString>(message: T) -> Error {
++	Error {
++		code: ErrorCode::InternalError,
++		message: message.to_string(),
++		data: None
++	}
++}
++
++pub fn error_on_execution_failure(reason: &ExitReason, data: &[u8]) -> Result<(), Error> {
++	match reason {
++		ExitReason::Succeed(_) => Ok(()),
++		ExitReason::Error(e) => {
++			Err(Error {
++				code: ErrorCode::InternalError,
++				message: format!("evm error: {:?}", e),
++				data: Some(Value::String("0x".to_string()))
++			})
++		},
++		ExitReason::Revert(_) => {
++			let mut message = "VM Exception while processing transaction: revert".to_string();
++			// A minimum size of error function selector (4) + offset (32) + string length (32)
++			// should contain a utf-8 encoded revert reason.
++			if data.len() > 68 {
++				let message_len = data[36..68].iter().sum::<u8>();
++				let body: &[u8] = &data[68..68 + message_len as usize];
++				if let Ok(reason) = std::str::from_utf8(body) {
++					message = format!("{} {}", message, reason.to_string());
++				}
++			}
++			Err(Error {
++				code: ErrorCode::InternalError,
++				message,
++				data: Some(Value::String(data.to_hex()))
++			})
++		},
++		ExitReason::Fatal(e) => {
++			Err(Error {
++				code: ErrorCode::InternalError,
++				message: format!("evm fatal: {:?}", e),
++				data: Some(Value::String("0x".to_string()))
++			})
++		},
++	}
++}
++
++pub fn public_key(transaction: &EthereumTransaction) -> Result<
++	[u8; 64], sp_io::EcdsaVerifyError
++> {
++	let mut sig = [0u8; 65];
++	let mut msg = [0u8; 32];
++	sig[0..32].copy_from_slice(&transaction.signature.r()[..]);
++	sig[32..64].copy_from_slice(&transaction.signature.s()[..]);
++	sig[64] = transaction.signature.standard_v();
++	msg.copy_from_slice(&EthereumTransactionMessage::from(transaction.clone()).hash()[..]);
++
++	sp_io::crypto::secp256k1_ecdsa_recover(&sig, &msg)
++}
++
++/// A generic Ethereum signer.
++pub trait EthSigner: Send + Sync {
++	/// Available accounts from this signer.
++	fn accounts(&self) -> Vec<H160>;
++	/// Sign a transaction message using the given account in message.
++	fn sign(
++		&self,
++		message: ethereum::TransactionMessage,
++		address: &H160,
++	) -> Result<ethereum::Transaction, Error>;
++}
++
++pub struct EthDevSigner {
++	keys: Vec<secp256k1::SecretKey>,
++}
++
++impl EthDevSigner {
++	pub fn new() -> Self {
++		Self {
++			keys: vec![
++				secp256k1::SecretKey::parse(&[
++					0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
++					0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
++					0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
++					0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
++				]).expect("Test key is valid; qed"),
++			],
++		}
++	}
++}
++
++impl EthSigner for EthDevSigner {
++	fn accounts(&self) -> Vec<H160> {
++		self.keys.iter().map(|secret| {
++			let public = secp256k1::PublicKey::from_secret_key(secret);
++			let mut res = [0u8; 64];
++			res.copy_from_slice(&public.serialize()[1..65]);
++
++			H160::from(H256::from_slice(Keccak256::digest(&res).as_slice()))
++		}).collect()
++	}
++
++	fn sign(
++		&self,
++		message: ethereum::TransactionMessage,
++		address: &H160,
++	) -> Result<ethereum::Transaction, Error> {
++		let mut transaction = None;
++
++		for secret in &self.keys {
++			let key_address = {
++				let public = secp256k1::PublicKey::from_secret_key(secret);
++				let mut res = [0u8; 64];
++				res.copy_from_slice(&public.serialize()[1..65]);
++				H160::from(H256::from_slice(Keccak256::digest(&res).as_slice()))
++			};
++
++			if &key_address == address {
++				let signing_message = secp256k1::Message::parse_slice(&message.hash()[..])
++					.map_err(|_| internal_err("invalid signing message"))?;
++				let (signature, recid) = secp256k1::sign(&signing_message, secret);
++
++				let v = match message.chain_id {
++					None => 27 + recid.serialize() as u64,
++					Some(chain_id) => 2 * chain_id + 35 + recid.serialize() as u64,
++				};
++				let rs = signature.serialize();
++				let r = H256::from_slice(&rs[0..32]);
++				let s = H256::from_slice(&rs[32..64]);
++
++				transaction = Some(ethereum::Transaction {
++					nonce: message.nonce,
++					gas_price: message.gas_price,
++					gas_limit: message.gas_limit,
++					action: message.action,
++					value: message.value,
++					input: message.input.clone(),
++					signature: ethereum::TransactionSignature::new(v, r, s)
++						.ok_or(internal_err("signer generated invalid signature"))?,
++				});
++
++				break
++			}
++		}
++
++		transaction.ok_or(internal_err("signer not available"))
++	}
++}
+diff --git a/frame/dynamic-fee/Cargo.toml b/frame/dynamic-fee/Cargo.toml
+index f966498..8aaaa07 100644
+--- a/frame/dynamic-fee/Cargo.toml
++++ b/frame/dynamic-fee/Cargo.toml
+@@ -9,12 +9,12 @@ license = "Apache-2.0"
+ [dependencies]
+ codec = { package = "parity-scale-codec", version = "1.0.0", default-features = false }
+ serde = { version = "1.0.101", optional = true }
+-sp-std = { version = "2.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-core = { version = "2.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-runtime = { version = "2.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-inherents = { version = "2.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-frame-system = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-frame-support = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++sp-std = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-core = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-runtime = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-inherents = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++frame-system = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++frame-support = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ 
+ [features]
+ default = ["std"]
+diff --git a/frame/ethereum/Cargo.toml b/frame/ethereum/Cargo.toml
+index 87e9be1..0ebb5d7 100644
+--- a/frame/ethereum/Cargo.toml
++++ b/frame/ethereum/Cargo.toml
+@@ -10,14 +10,14 @@ license = "Apache-2.0"
+ rustc-hex = { version = "2.1.0", default-features = false }
+ serde = { version = "1.0.101", optional = true }
+ codec = { package = "parity-scale-codec", version = "1.0.0", default-features = false }
+-frame-support = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-frame-system = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-pallet-balances = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-pallet-timestamp = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-pallet-evm = { version = "2.0.0-dev", default-features = false, path = "../evm" }
+-sp-runtime = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-std = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-io = { version = "2.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++frame-support = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++frame-system = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++pallet-balances = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++pallet-timestamp = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++pallet-evm = { default-features = false, path = "../evm" }
++sp-runtime = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-std = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ fp-evm = { version = "0.8.0", default-features = false, path = "../../primitives/evm" }
+ evm = { version = "0.23.0", features = ["with-codec"], default-features = false }
+ ethereum = { version = "0.6", default-features = false, features = ["with-codec"] }
+@@ -29,7 +29,7 @@ fp-consensus = { path = "../../primitives/consensus", default-features = false }
+ fp-rpc = { path = "../../primitives/rpc", default-features = false }
+ 
+ [dev-dependencies]
+-sp-core = { version = "2.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++sp-core = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ 
+ [features]
+ default = ["std"]
+diff --git a/frame/evm/Cargo.toml b/frame/evm/Cargo.toml
+index 7142cd8..bbd3a07 100644
+--- a/frame/evm/Cargo.toml
++++ b/frame/evm/Cargo.toml
+@@ -15,14 +15,14 @@ targets = ["x86_64-unknown-linux-gnu"]
+ [dependencies]
+ serde = { version = "1.0.101", optional = true, features = ["derive"] }
+ codec = { package = "parity-scale-codec", version = "1.3.4", default-features = false }
+-frame-support = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-frame-system = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-pallet-timestamp = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-pallet-balances = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-core = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-runtime = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-std = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-io = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++frame-support = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++frame-system = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++pallet-timestamp = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++pallet-balances = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-runtime = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-std = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ fp-evm = { version = "0.8.0", default-features = false, path = "../../primitives/evm" }
+ primitive-types = { version = "0.8.0", default-features = false, features = ["rlp", "byteorder"] }
+ rlp = { version = "0.5", default-features = false }
+diff --git a/frame/evm/precompile/blake2/Cargo.toml b/frame/evm/precompile/blake2/Cargo.toml
+index 0b90e00..81e9c83 100644
+--- a/frame/evm/precompile/blake2/Cargo.toml
++++ b/frame/evm/precompile/blake2/Cargo.toml
+@@ -9,8 +9,8 @@ repository = "https://github.com/paritytech/substrate/"
+ description = "BLAKE2 precompiles for EVM pallet."
+ 
+ [dependencies]
+-sp-core = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-io = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ fp-evm = { version = "0.8.0", default-features = false, path = "../../../../primitives/evm" }
+ evm = { version = "0.23.0", default-features = false, features = ["with-codec"] }
+ 
+diff --git a/frame/evm/precompile/bn128/Cargo.toml b/frame/evm/precompile/bn128/Cargo.toml
+index 454d03d..d017bbc 100644
+--- a/frame/evm/precompile/bn128/Cargo.toml
++++ b/frame/evm/precompile/bn128/Cargo.toml
+@@ -9,8 +9,8 @@ repository = "https://github.com/paritytech/substrate/"
+ description = "BN128 precompiles for EVM pallet."
+ 
+ [dependencies]
+-sp-core = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-io = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ fp-evm = { version = "0.8.0", default-features = false, path = "../../../../primitives/evm" }
+ evm = { version = "0.23.0", default-features = false, features = ["with-codec"] }
+ bn = { package = "substrate-bn", version = "0.5", default-features = false }
+diff --git a/frame/evm/precompile/dispatch/Cargo.toml b/frame/evm/precompile/dispatch/Cargo.toml
+index d81c547..e43d8f5 100644
+--- a/frame/evm/precompile/dispatch/Cargo.toml
++++ b/frame/evm/precompile/dispatch/Cargo.toml
+@@ -9,10 +9,10 @@ repository = "https://github.com/paritytech/substrate/"
+ description = "DISPATCH precompiles for EVM pallet."
+ 
+ [dependencies]
+-sp-core = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-io = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-frame-support = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-pallet-evm = { version = "2.0.0", default-features = false, path = "../.." }
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++frame-support = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++pallet-evm = { default-features = false, path = "../.." }
+ fp-evm = { version = "0.8.0", default-features = false, path = "../../../../primitives/evm" }
+ evm = { version = "0.23.0", default-features = false, features = ["with-codec"] }
+ codec = { package = "parity-scale-codec", version = "1.3.5", default-features = false }
+diff --git a/frame/evm/precompile/ed25519/Cargo.toml b/frame/evm/precompile/ed25519/Cargo.toml
+index 4d360e2..6bb5358 100644
+--- a/frame/evm/precompile/ed25519/Cargo.toml
++++ b/frame/evm/precompile/ed25519/Cargo.toml
+@@ -9,8 +9,8 @@ repository = "https://github.com/paritytech/substrate/"
+ description = "ED25519 precompiles for EVM pallet."
+ 
+ [dependencies]
+-sp-core = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-io = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ fp-evm = { version = "0.8.0", default-features = false, path = "../../../../primitives/evm" }
+ evm = { version = "0.23.0", default-features = false, features = ["with-codec"] }
+ ed25519-dalek = { version = "1.0.0", features = ["alloc", "u64_backend"], default-features = false }
+diff --git a/frame/evm/precompile/modexp/Cargo.toml b/frame/evm/precompile/modexp/Cargo.toml
+index e52e254..136e568 100644
+--- a/frame/evm/precompile/modexp/Cargo.toml
++++ b/frame/evm/precompile/modexp/Cargo.toml
+@@ -9,8 +9,8 @@ repository = "https://github.com/paritytech/substrate/"
+ description = "MODEXP precompiles for EVM pallet."
+ 
+ [dependencies]
+-sp-core = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-io = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ fp-evm = { version = "0.8.0", default-features = false, path = "../../../../primitives/evm" }
+ evm = { version = "0.23.0", default-features = false, features = ["with-codec"] }
+ num = { version = "0.3", features = ["alloc"], default-features = false }
+diff --git a/frame/evm/precompile/simple/Cargo.toml b/frame/evm/precompile/simple/Cargo.toml
+index ff23d91..9c17a19 100644
+--- a/frame/evm/precompile/simple/Cargo.toml
++++ b/frame/evm/precompile/simple/Cargo.toml
+@@ -9,8 +9,8 @@ repository = "https://github.com/paritytech/substrate/"
+ description = "Simple precompiles for EVM pallet."
+ 
+ [dependencies]
+-sp-core = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-io = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ fp-evm = { version = "0.8.0", default-features = false, path = "../../../../primitives/evm" }
+ evm = { version = "0.23.0", default-features = false, features = ["with-codec"] }
+ ripemd160 = { version = "0.9", default-features = false }
+diff --git a/node/Cargo.toml b/node/Cargo.toml
+index b6bb1ae..205c0de 100644
+--- a/node/Cargo.toml
++++ b/node/Cargo.toml
+@@ -56,10 +56,10 @@ substrate-frame-rpc-system = '3.0.0'
+ pallet-ssvm = { default-features = false, version = "0.2.0-rc1" }
+ 
+ # EVM
+-pallet-evm = { path = "../../frame/evm" }
+-pallet-ethereum = { path = "../../frame/ethereum" }
+-fc-consensus = { path = "../../client/consensus" }
+-fp-consensus = { path = "../../primitives/consensus" }
++pallet-evm = { path = "../frame/evm" }
++pallet-ethereum = { path = "../frame/ethereum" }
++fc-consensus = { path = "../client/consensus" }
++fp-consensus = { path = "../primitives/consensus" }
+ 
+ [features]
+ default = []
+diff --git a/primitives/consensus/Cargo.toml b/primitives/consensus/Cargo.toml
+index f27171e..35a9d1d 100644
+--- a/primitives/consensus/Cargo.toml
++++ b/primitives/consensus/Cargo.toml
+@@ -9,9 +9,9 @@ homepage = "https://substrate.dev"
+ repository = "https://github.com/paritytech/substrate/"
+ 
+ [dependencies]
+-sp-std = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-runtime = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
+-sp-core = { version = "2.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "frontier" }
++sp-std = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-runtime = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+ codec = { package = "parity-scale-codec", version = "1.3.1", default-features = false, features = ["derive"] }
+ 
+ [features]
+diff --git a/primitives/evm/Cargo.toml b/primitives/evm/Cargo.toml
+index 5b6c315..3523830 100644
+--- a/primitives/evm/Cargo.toml
++++ b/primitives/evm/Cargo.toml
+@@ -14,8 +14,8 @@ readme = "README.md"
+ targets = ["x86_64-unknown-linux-gnu"]
+ 
+ [dependencies]
+-sp-core = { version = "2.0.0", git = "https://github.com/paritytech/substrate.git", branch = "frontier", default-features = false }
+-sp-std = { version = "2.0.0", git = "https://github.com/paritytech/substrate.git", branch = "frontier", default-features = false }
++sp-core = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0', default-features = false }
++sp-std = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0', default-features = false }
+ serde = { version = "1.0.101", optional = true, features = ["derive"] }
+ codec = { package = "parity-scale-codec", version = "1.3.4", default-features = false }
+ evm = { version = "0.23.0", default-features = false, features = ["with-codec"] }
+diff --git a/primitives/rpc/Cargo.toml b/primitives/rpc/Cargo.toml
+new file mode 100644
+index 0000000..73141b0
+--- /dev/null
++++ b/primitives/rpc/Cargo.toml
+@@ -0,0 +1,32 @@
++[package]
++name = "fp-rpc"
++version = "0.1.0"
++authors = ["Parity Technologies <admin@parity.io"]
++edition = "2018"
++description = "Runtime primitives for Ethereum RPC (web3) compatibility layer for Substrate."
++license = "Apache-2.0"
++
++[dependencies]
++sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-api = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++fp-evm = { version = "0.8.0", default-features = false, path = "../../primitives/evm" }
++ethereum = { version = "0.6", default-features = false, features = ["with-codec"] }
++ethereum-types = { version = "0.10", default-features = false }
++codec = { package = "parity-scale-codec", version = "1.0.0", default-features = false }
++sp-runtime = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-std = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
++
++[features]
++default = ["std"]
++std = [
++	"sp-core/std",
++	"sp-api/std",
++	"fp-evm/std",
++	"ethereum/std",
++	"ethereum-types/std",
++	"codec/std",
++	"sp-runtime/std",
++	"sp-std/std",
++	"sp-io/std",
++]
+diff --git a/primitives/rpc/src/lib.rs b/primitives/rpc/src/lib.rs
+new file mode 100644
+index 0000000..bdc2ed7
+--- /dev/null
++++ b/primitives/rpc/src/lib.rs
+@@ -0,0 +1,104 @@
++// SPDX-License-Identifier: Apache-2.0
++// This file is part of Frontier.
++//
++// Copyright (c) 2020 Parity Technologies (UK) Ltd.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// 	http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++#![cfg_attr(not(feature = "std"), no_std)]
++
++use sp_core::{H160, H256, U256};
++use ethereum::{Log, Block as EthereumBlock};
++use ethereum_types::Bloom;
++use codec::{Encode, Decode};
++use sp_std::vec::Vec;
++
++#[derive(Eq, PartialEq, Clone, Encode, Decode, sp_runtime::RuntimeDebug)]
++pub struct TransactionStatus {
++	pub transaction_hash: H256,
++	pub transaction_index: u32,
++	pub from: H160,
++	pub to: Option<H160>,
++	pub contract_address: Option<H160>,
++	pub logs: Vec<Log>,
++	pub logs_bloom: Bloom,
++}
++
++impl Default for TransactionStatus {
++	fn default() -> Self {
++		TransactionStatus {
++			transaction_hash: H256::default(),
++			transaction_index: 0 as u32,
++			from: H160::default(),
++			to: None,
++			contract_address: None,
++			logs: Vec::new(),
++			logs_bloom: Bloom::default(),
++		}
++	}
++}
++
++sp_api::decl_runtime_apis! {
++	/// API necessary for Ethereum-compatibility layer.
++	pub trait EthereumRuntimeRPCApi {
++		/// Returns runtime defined pallet_evm::ChainId.
++		fn chain_id() -> u64;
++		/// Returns pallet_evm::Accounts by address.
++		fn account_basic(address: H160) -> fp_evm::Account;
++		/// Returns FixedGasPrice::min_gas_price
++		fn gas_price() -> U256;
++		/// For a given account address, returns pallet_evm::AccountCodes.
++		fn account_code_at(address: H160) -> Vec<u8>;
++		/// Returns the converted FindAuthor::find_author authority id.
++		fn author() -> H160;
++		/// For a given account address and index, returns pallet_evm::AccountStorages.
++		fn storage_at(address: H160, index: U256) -> H256;
++		/// Returns a frame_ethereum::call response. If `estimate` is true,
++		fn call(
++			from: H160,
++			to: H160,
++			data: Vec<u8>,
++			value: U256,
++			gas_limit: U256,
++			gas_price: Option<U256>,
++			nonce: Option<U256>,
++			estimate: bool,
++		) -> Result<fp_evm::CallInfo, sp_runtime::DispatchError>;
++		/// Returns a frame_ethereum::create response.
++		fn create(
++			from: H160,
++			data: Vec<u8>,
++			value: U256,
++			gas_limit: U256,
++			gas_price: Option<U256>,
++			nonce: Option<U256>,
++			estimate: bool,
++		) -> Result<fp_evm::CreateInfo, sp_runtime::DispatchError>;
++		/// Return the current block.
++		fn current_block() -> Option<EthereumBlock>;
++		/// Return the current receipt.
++		fn current_receipts() -> Option<Vec<ethereum::Receipt>>;
++		/// Return the current transaction status.
++		fn current_transaction_statuses() -> Option<Vec<TransactionStatus>>;
++		/// Return all the current data for a block in a single runtime call.
++		fn current_all() -> (
++			Option<EthereumBlock>,
++			Option<Vec<ethereum::Receipt>>,
++			Option<Vec<TransactionStatus>>
++		);
++	}
++}
++
++pub trait ConvertTransaction<E> {
++	fn convert_transaction(&self, transaction: ethereum::Transaction) -> E;
++}
+diff --git a/runtime/Cargo.toml b/runtime/Cargo.toml
+index bd96cbd..1efc4a4 100644
+--- a/runtime/Cargo.toml
++++ b/runtime/Cargo.toml
+@@ -57,9 +57,9 @@ sha3 = { default-features = false, version = "0.8" }
+ hash256-std-hasher = { default-features = false, version = '0.15.2' }
+ 
+ # EVM
+-pallet-ethereum = { version = "0.1.0", default-features = false, path = "../../frame/ethereum" }
+-pallet-evm = { version = "2.0.0-dev", default-features = false, path = "../../frame/evm" }
+-pallet-evm-precompile-simple = { version = "2.0.0-dev", default-features = false, path = "../../frame/evm/precompile/simple" }
++pallet-ethereum = { version = "0.1.0", default-features = false, path = "../frame/ethereum" }
++pallet-evm = { default-features = false, path = "../frame/evm" }
++pallet-evm-precompile-simple = { default-features = false, path = "../frame/evm/precompile/simple" }
+ 
+ [features]
+ default = ['std']

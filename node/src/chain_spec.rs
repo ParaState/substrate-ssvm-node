@@ -1,7 +1,7 @@
 use sp_core::{Pair, Public, sr25519};
 use ssvm_node_runtime::{
-    AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig, SSVMAccount, SSVMConfig,
-    Sha3Hasher, Signature, SudoConfig, SystemConfig, WASM_BINARY,
+    AccountId, AuraConfig, BalancesConfig, EVMConfig, EthereumConfig,, GenesisConfig, GrandpaConfig,
+    SSVMAccount, SSVMConfig, Sha3Hasher, Signature, SudoConfig, SystemConfig, WASM_BINARY,
 };
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_finality_grandpa::AuthorityId as GrandpaId;
@@ -165,5 +165,9 @@ fn testnet_genesis(
 					},
 			)],
 		}),
+		pallet_evm: Some(EVMConfig {
+			accounts: BTreeMap::new(),
+		}),
+		pallet_ethereum: Some(EthereumConfig {}),
 	}
 }

@@ -1,0 +1,57 @@
+[package]
+name = "pallet-ethereum"
+version = "0.1.0"
+authors = ["Parity Technologies <admin@parity.io>"]
+edition = "2018"
+description = "Ethereum compatibility full block processing emulation pallet for Substrate."
+license = "Apache-2.0"
+
+[dependencies]
+rustc-hex = { version = "2.1.0", default-features = false }
+serde = { version = "1.0.101", optional = true }
+codec = { package = "parity-scale-codec", version = "2.0.0", default-features = false }
+frame-support = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+frame-system = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+pallet-balances = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+pallet-timestamp = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+pallet-evm = { default-features = false, path = "../evm" }
+sp-runtime = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+sp-std = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+sp-io = { default-features = false, git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+fp-evm = { version = "0.8.0", default-features = false, path = "../../primitives/evm" }
+evm = { version = "0.24.0", features = ["with-codec"], default-features = false }
+ethereum = { version = "0.7.1", default-features = false, features = ["with-codec"] }
+ethereum-types = { version = "0.11.0", default-features = false }
+rlp = { version = "0.5", default-features = false }
+sha3 = { version = "0.8", default-features = false }
+libsecp256k1 = { version = "0.3", default-features = false }
+fp-consensus = { path = "../../primitives/consensus", default-features = false }
+fp-rpc = { path = "../../primitives/rpc", default-features = false }
+
+[dev-dependencies]
+sp-core = { git = "https://github.com/paritytech/substrate.git", version = '3.0.0' }
+
+[features]
+default = ["std"]
+std = [
+	"serde",
+	"rustc-hex/std",
+	"codec/std",
+	"sp-runtime/std",
+	"frame-support/std",
+	"frame-system/std",
+	"pallet-balances/std",
+	"pallet-timestamp/std",
+	"pallet-evm/std",
+	"sp-io/std",
+	"sp-std/std",
+	"fp-evm/std",
+	"ethereum/std",
+	"ethereum-types/std",
+	"rlp/std",
+	"sha3/std",
+	"libsecp256k1/std",
+	"fp-consensus/std",
+	"fp-rpc/std",
+	"evm/std",
+]
